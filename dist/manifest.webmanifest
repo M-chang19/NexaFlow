@@ -1,0 +1,18 @@
+{
+  "name": "NexaFlow Workspace",
+  "short_name": "NexaFlow",
+  "description": "A calm workspace for projects, tasks, notes, and focused work.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f1",
+  "theme_color": "#188879",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

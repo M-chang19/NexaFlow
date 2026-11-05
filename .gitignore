@@ -1,7 +1,6 @@
 # Keep personal workspace data and local backups out of source control.
 /data/
 /node_modules/
-/dist/
 /.node-runtime-temp/
 nexaflow-backup-*.json
 .env
