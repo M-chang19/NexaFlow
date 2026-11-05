@@ -1,0 +1,18 @@
+services:
+  nexaflow:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:4317:4317"
+    environment:
+      NEXAFLOW_HOST: "0.0.0.0"
+      NEXAFLOW_PORT: "4317"
+      NEXAFLOW_AI_API_KEY: ${NEXAFLOW_AI_API_KEY:-}
+      NEXAFLOW_AI_BASE_URL: ${NEXAFLOW_AI_BASE_URL:-}
+      NEXAFLOW_AI_MODEL: ${NEXAFLOW_AI_MODEL:-}
+    volumes:
+      - nexaflow-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  nexaflow-data:
