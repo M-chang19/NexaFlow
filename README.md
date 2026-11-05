@@ -50,6 +50,8 @@ The root URL shows the NexaFlow introduction. Open [http://127.0.0.1:5173/worksp
 
 ## Production
 
+The built site is included in `dist\` for deployments that serve the checked-in production output. When changing the app, regenerate it with `npm run build` and commit the updated `dist\` files along with the source changes.
+
 ```powershell
 npm run build
 npm start
