@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import SyncSettings from "./SyncSettings.jsx";
 import { createCalendarFile } from "./calendarExport.js";
+import { GoalsPage, TemplatesPage } from "./ProductivityPages.jsx";
 import {
   authenticateSupabase,
   readSupabaseSession,
@@ -13,7 +14,7 @@ import {
   writeSupabaseWorkspace
 } from "./sync.js";
 
-const EMPTY_STATE = { projects: [], tasks: [], notes: [], messages: [], activity: [] };
+const EMPTY_STATE = { projects: [], tasks: [], notes: [], messages: [], activity: [], goals: [], templates: [] };
 const OVERVIEW_PANELS = [
   { id: "hero", label: "Welcome banner" },
   { id: "tasks", label: "Next steps" },
@@ -41,9 +42,20 @@ const VIEW_TITLES = {
   projects: "Projects",
   assistant: "AI assistant",
   notes: "Notes",
-  settings: "Settings"
+  settings: "Settings",
+  goals: "Goals & milestones",
+  templates: "Templates"
 };
 const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function readSavedTaskViews() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("nexaflow-saved-task-views") || "[]");
+    return Array.isArray(saved) ? saved.filter(view => view && typeof view.id === "string" && typeof view.name === "string" && view.filters && typeof view.filters === "object") : [];
+  } catch (error) {
+    console.error("Could not read saved task views:", error);
+    return [];
+  }
+}
 function readOverviewPreferences() {
   try {
     const saved = JSON.parse(localStorage.getItem("nexaflow-overview-preferences") || "null");
@@ -120,8 +132,11 @@ function EmptyState({ icon = "✦", title, description, action }) {
   );
 }
 
-function TaskRow({ task, projects, onToggle, onStatus, onDelete, onToggleSubtask, onEdit }) {
+function TaskRow({ task, projects, allTasks = [], notes = [], onToggle, onStatus, onDelete, onToggleSubtask, onEdit }) {
   const project = projects.find(item => item.id === task.projectId);
+  const dependencies = (task.dependencyIds || []).map(id => allTasks.find(item => item.id === id)).filter(Boolean);
+  const linkedNotes = (task.relatedNoteIds || []).map(id => notes.find(item => item.id === id)).filter(Boolean);
+  const blockedBy = dependencies.filter(item => item.status !== "done");
   const dueState = task.dueDate && task.status !== "done" ? (task.dueDate < todayKey() ? "overdue" : task.dueDate === todayKey() ? "due-today" : "") : "";
   return (
     <div className={`task-row-wrap ${dueState}`}>
@@ -133,6 +148,9 @@ function TaskRow({ task, projects, onToggle, onStatus, onDelete, onToggleSubtask
         <strong className={task.status === "done" ? "task-done" : ""}>{task.title}</strong>
         <small>{project && <><span className="task-project-dot" />{project.name} · </>}{task.details || (task.status === "done" ? "Completed" : "No extra details")}{task.dueDate && <> · <span className={`task-due ${dueState}`}>{dueState === "overdue" ? "Overdue" : dueState === "due-today" ? "Due today" : `Due ${task.dueDate}`}</span></>}</small>
         {(task.priority || task.tags?.length > 0) && <div className="task-badges">{task.priority && <span className={`priority-badge priority-${task.priority}`}>{task.priority} priority</span>}{(task.tags || []).map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
+        {blockedBy.length > 0 && <small className="task-dependency-note">Blocked by: {blockedBy.map(item => item.title).join(", ")}</small>}
+        {task.scheduledAt && <small className="task-schedule-note">◷ Scheduled {new Date(task.scheduledAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</small>}
+        {linkedNotes.length > 0 && <small className="task-link-note">Linked notes: {linkedNotes.map(item => item.title).join(", ")}</small>}
       </div>
       <select className={`task-status status-${task.status}`} value={task.status} onChange={event => onStatus(task.id, event.target.value)} aria-label={`Status for ${task.title}`}>
         <option value="todo">To do</option>
@@ -217,7 +235,21 @@ function ShortcutsDialog({ onClose, onCreate }) {
   );
 }
 
-function CreateDialog({ item, projects, onClose, onCreate }) {
+function wouldCreateDependencyCycle(taskId, dependencyId, tasks) {
+  const pending = [dependencyId];
+  const visited = new Set();
+  while (pending.length) {
+    const currentId = pending.pop();
+    if (currentId === taskId) return true;
+    if (visited.has(currentId)) continue;
+    visited.add(currentId);
+    const current = tasks.find(task => task.id === currentId);
+    pending.push(...(current?.dependencyIds || []));
+  }
+  return false;
+}
+
+function CreateDialog({ item, projects, tasks, notes, onClose, onCreate }) {
   const dialogRef = useRef(null);
   const nameRef = useRef(null);
   const configs = {
@@ -259,6 +291,17 @@ function CreateDialog({ item, projects, onClose, onCreate }) {
       window.alert("Add a due date before setting a task to repeat.");
       return;
     }
+    if (item.type === "task" && formData.get("scheduledAt")) {
+      const start = new Date(String(formData.get("scheduledAt"))).getTime();
+      const duration = Math.max(5, Number(formData.get("estimatedMinutes") || 25)) * 60000;
+      const overlaps = tasks.find(task => task.id !== item.record?.id && task.status !== "done" && task.scheduledAt &&
+        start < new Date(task.scheduledAt).getTime() + (task.estimatedMinutes || 25) * 60000 &&
+        start + duration > new Date(task.scheduledAt).getTime());
+      if (overlaps) {
+        window.alert(`This focus block overlaps "${overlaps.title}". Choose a different time.`);
+        return;
+      }
+    }
     onCreate({
       type: item.type,
       id: item.record?.id,
@@ -272,6 +315,11 @@ function CreateDialog({ item, projects, onClose, onCreate }) {
       recurrence: String(formData.get("recurrence") || ""),
       tags: splitTags(String(formData.get("tags") || "")),
       subtasks: String(formData.get("subtasks") || "").split("\n").map(title => title.trim()).filter(Boolean).slice(0, 30),
+      dependencyIds: formData.getAll("dependencyIds").map(String),
+      relatedNoteIds: formData.getAll("relatedNoteIds").map(String),
+      relatedTaskIds: formData.getAll("relatedTaskIds").map(String),
+      scheduledAt: String(formData.get("scheduledAt") || ""),
+      estimatedMinutes: Math.max(0, Math.min(1440, Number(formData.get("estimatedMinutes") || 0))),
       status: String(formData.get("status") || item.record?.status || "todo")
     });
   }
@@ -300,6 +348,16 @@ function CreateDialog({ item, projects, onClose, onCreate }) {
             </div>
             <label>Repeat<select name="recurrence" defaultValue={item.record?.recurrence || ""}><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
             <label>Reminder (optional)<input name="reminderAt" type="datetime-local" defaultValue={item.record?.reminderAt ? item.record.reminderAt.slice(0, 16) : ""} /></label>
+            <label>Schedule a focus block<input name="scheduledAt" type="datetime-local" defaultValue={item.record?.scheduledAt ? item.record.scheduledAt.slice(0, 16) : ""} /></label>
+            <label>Estimated focus time (minutes)<input name="estimatedMinutes" type="number" min="0" max="1440" step="5" defaultValue={item.record?.estimatedMinutes || 25} /></label>
+            {tasks.filter(task => task.id !== item.record?.id && !wouldCreateDependencyCycle(item.record?.id || "", task.id, tasks)).length > 0 && <label>Depends on (select one or more)
+              <select name="dependencyIds" multiple size={Math.min(4, tasks.filter(task => task.id !== item.record?.id && !wouldCreateDependencyCycle(item.record?.id || "", task.id, tasks)).length)} defaultValue={item.record?.dependencyIds || []}>
+                {tasks.filter(task => task.id !== item.record?.id && !wouldCreateDependencyCycle(item.record?.id || "", task.id, tasks)).map(task => <option value={task.id} key={task.id}>{task.title}</option>)}
+              </select>
+            </label>}
+            {notes.length > 0 && <label>Related notes (select one or more)
+              <select name="relatedNoteIds" multiple size={Math.min(4, notes.length)} defaultValue={item.record?.relatedNoteIds || []}>{notes.map(note => <option value={note.id} key={note.id}>{note.title}</option>)}</select>
+            </label>}
             <label>Tags (comma-separated)<input name="tags" maxLength={240} defaultValue={(item.record?.tags || []).join(", ")} placeholder="design, launch, follow-up" /></label>
             {item.record && <label>Status<select name="status" defaultValue={item.record.status}><option value="todo">To do</option><option value="in-progress">In progress</option><option value="done">Done</option></select></label>}
             <label>Subtasks (one per line)<textarea name="subtasks" rows="3" maxLength={1200} defaultValue={(item.record?.subtasks || []).map(subtask => subtask.title).join("\n")} placeholder={"Research options\nDraft the first version"} /></label>
@@ -309,6 +367,9 @@ function CreateDialog({ item, projects, onClose, onCreate }) {
             <label>Tags (comma-separated)<input name="tags" maxLength={240} defaultValue={(item.record?.tags || []).join(", ")} placeholder="work, personal, learning" /></label>
           </>}
           {item.type === "note" && projects.length > 0 && <label>Project (optional)<select name="projectId" defaultValue={item.record?.projectId || item.projectId || ""}><option value="">No project</option>{projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>}
+          {item.type === "note" && tasks.length > 0 && <label>Related tasks (select one or more)
+            <select name="relatedTaskIds" multiple size={Math.min(4, tasks.length)} defaultValue={item.record?.relatedTaskIds || []}>{tasks.map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select>
+          </label>}
           <label>{config.details}<textarea name="details" rows="4" maxLength="1200" required={item.type === "note"} defaultValue={item.record?.details ?? item.record?.description ?? item.record?.body ?? ""} placeholder={config.detailsPlaceholder} /></label>
           <div className="modal-actions">
             <button type="button" className="button button-secondary" onClick={onClose}>Cancel</button>
@@ -344,7 +405,7 @@ function Overview({ state, openCreate, navigate, taskActions, preferences }) {
     tasks: <section className="section-block">
       <div className="section-heading"><div><Eyebrow>YOUR NEXT STEPS</Eyebrow><h2>Tasks to move forward <span className="heading-count">{openTasks.length}</span></h2></div><button className="link-button" onClick={() => navigate("tasks")}>All tasks <span>→</span></button></div>
       <div className="task-list card-surface">
-        {openTasks.length ? openTasks.slice(0, 5).map(task => <TaskRow key={task.id} task={task} {...taskActions} projects={state.projects} />) : <EmptyState title={state.tasks.length ? "Everything is wrapped up." : "Your next step starts here."} description={state.tasks.length ? "Take a breath, or capture your next idea." : "Add a task to give your ideas a little momentum."} action={!state.tasks.length && <button className="link-button" onClick={() => openCreate("task")}>Create your first task <span>→</span></button>} />}
+        {openTasks.length ? openTasks.slice(0, 5).map(task => <TaskRow key={task.id} task={task} {...taskActions} projects={state.projects} allTasks={state.tasks} notes={state.notes} />) : <EmptyState title={state.tasks.length ? "Everything is wrapped up." : "Your next step starts here."} description={state.tasks.length ? "Take a breath, or capture your next idea." : "Add a task to give your ideas a little momentum."} action={!state.tasks.length && <button className="link-button" onClick={() => openCreate("task")}>Create your first task <span>→</span></button>} />}
       </div>
     </section>,
     insights: <section className="section-block">
@@ -384,12 +445,14 @@ function Overview({ state, openCreate, navigate, taskActions, preferences }) {
   );
 }
 
-function TasksPage({ tasks, projects, openCreate, taskActions }) {
+function TasksPage({ tasks, projects, notes, openCreate, taskActions, savedViews, onSaveView, onBulkUpdate, onBulkDelete }) {
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("due");
   const [projectFilter, setProjectFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [activeSavedView, setActiveSavedView] = useState("");
   const filtered = tasks.filter(task => (filter === "all" || task.status === filter) &&
     (projectFilter === "all" || (projectFilter === "__unassigned__" ? !task.projectId : task.projectId === projectFilter)) &&
     (priorityFilter === "all" || (task.priority || "medium") === priorityFilter) &&
@@ -400,12 +463,31 @@ function TasksPage({ tasks, projects, openCreate, taskActions }) {
     return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
   });
   const hasFilters = query || filter !== "all" || projectFilter !== "all" || priorityFilter !== "all";
+  function saveCurrentView() {
+    const name = window.prompt("Name this task view:");
+    if (!name?.trim()) return;
+    const view = { id: makeId(), name: name.trim(), filters: { filter, query, sort, projectFilter, priorityFilter } };
+    onSaveView([...savedViews, view]);
+    setActiveSavedView(view.id);
+  }
+  function applySavedView(event) {
+    const view = savedViews.find(item => item.id === event.target.value);
+    setActiveSavedView(view?.id || "");
+    if (!view) return;
+    setFilter(view.filters.filter || "all");
+    setQuery(view.filters.query || "");
+    setSort(view.filters.sort || "due");
+    setProjectFilter(view.filters.projectFilter || "all");
+    setPriorityFilter(view.filters.priorityFilter || "all");
+  }
   return (
     <section className="view active">
       <PageIntro eyebrow="ONE THING AT A TIME" title="Your tasks" description="Keep the next steps small, clear, and moving." action={<button className="button button-primary" onClick={() => openCreate("task")}><span>＋</span> Add a task</button>} />
       <div className="toolbar card-surface"><div className="filter-tabs" role="group" aria-label="Filter tasks">
         {[["all", `All ${tasks.length}`], ["todo", "To do"], ["in-progress", "In progress"], ["done", "Done"]].map(([value, label]) => <button key={value} className={`filter-tab ${filter === value ? "active" : ""}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
       </div></div><div className="toolbar-extra">
+        <label className="sort-field">Saved view<select value={activeSavedView} onChange={applySavedView}><option value="">Choose a view</option>{savedViews.map(view => <option value={view.id} key={view.id}>{view.name}</option>)}</select></label>
+        <button className="clear-filters" onClick={saveCurrentView}>Save current view</button>
         <label className="search-field"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a task…" aria-label="Search tasks" /></label>
         <label className="sort-field">Project<select value={projectFilter} onChange={event => setProjectFilter(event.target.value)} aria-label="Filter tasks by project"><option value="all">All projects</option><option value="__unassigned__">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
         <label className="sort-field">Priority<select value={priorityFilter} onChange={event => setPriorityFilter(event.target.value)} aria-label="Filter tasks by priority"><option value="all">All priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
@@ -413,7 +495,13 @@ function TasksPage({ tasks, projects, openCreate, taskActions }) {
         <span className="result-count" aria-live="polite">{filtered.length} {filtered.length === 1 ? "task" : "tasks"}</span>
         {hasFilters && <button className="clear-filters" onClick={() => { setQuery(""); setFilter("all"); setProjectFilter("all"); setPriorityFilter("all"); }}>Clear filters</button>}
       </div>
-      <div className="task-list tasks-page-list card-surface">{filtered.length ? filtered.map(task => <TaskRow key={task.id} task={task} projects={projects} {...taskActions} />) : <EmptyState title={tasks.length ? "No tasks match that view." : "A fresh page, full of possibility."} description={tasks.length ? "Try another filter or search." : "Create a task to capture your next step."} action={!tasks.length && <button className="button button-secondary" onClick={() => openCreate("task")}>＋ Add a task</button>} />}</div>
+      {savedViews.length > 0 && activeSavedView && <button className="clear-filters" onClick={() => { onSaveView(savedViews.filter(view => view.id !== activeSavedView)); setActiveSavedView(""); }}>Delete saved view</button>}
+      {selectedIds.length > 0 && <div className="bulk-toolbar card-surface"><strong>{selectedIds.length} selected</strong><label>Status<select value="" onChange={event => { if (event.target.value) onBulkUpdate(selectedIds, { status: event.target.value }); setSelectedIds([]); }}><option value="">Set status…</option><option value="todo">To do</option><option value="in-progress">In progress</option><option value="done">Done</option></select></label><label>Priority<select value="" onChange={event => { if (event.target.value) onBulkUpdate(selectedIds, { priority: event.target.value }); setSelectedIds([]); }}><option value="">Set priority…</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Project<select value="" onChange={event => { if (event.target.value !== "") onBulkUpdate(selectedIds, { projectId: event.target.value }); setSelectedIds([]); }}><option value="">Move to project…</option><option value="__unassigned__">No project</option>{projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><button className="button button-secondary" onClick={() => { onBulkDelete(selectedIds); setSelectedIds([]); }}>Delete selected</button></div>}
+      <div className="bulk-select-row"><label><input type="checkbox" checked={filtered.length > 0 && filtered.every(task => selectedIds.includes(task.id))} onChange={event => {
+        const visibleIds = filtered.map(task => task.id);
+        setSelectedIds(current => event.target.checked ? [...new Set([...current, ...visibleIds])] : current.filter(id => !visibleIds.includes(id)));
+      }} /> Select all visible</label></div>
+      <div className="task-list tasks-page-list card-surface">{filtered.length ? filtered.map(task => <div className="selectable-task" key={task.id}><label className="task-select"><input type="checkbox" checked={selectedIds.includes(task.id)} onChange={event => setSelectedIds(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id))} aria-label={`Select ${task.title}`} /></label><TaskRow task={task} projects={projects} allTasks={tasks} notes={notes} {...taskActions} /></div>) : <EmptyState title={tasks.length ? "No tasks match that view." : "A fresh page, full of possibility."} description={tasks.length ? "Try another filter or search." : "Create a task to capture your next step."} action={!tasks.length && <button className="button button-secondary" onClick={() => openCreate("task")}>＋ Add a task</button>} />}</div>
     </section>
   );
 }
@@ -495,9 +583,10 @@ function CalendarPage({ tasks, navigate, onExportCalendar }) {
       <div className="calendar-heading"><button className="icon-button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month">←</button><h2>{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><button className="icon-button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month">→</button></div>
       <div className="calendar-grid">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(day => <strong className="calendar-weekday" key={day}>{day}</strong>)}{cells.map((day, index) => {
         const due = day ? tasks.filter(task => task.dueDate === dateKey(day)) : [];
-        return <div key={`${day || "blank"}-${index}`} className={`calendar-day ${day && dateKey(day) === todayKey() ? "calendar-today" : ""} ${day ? "" : "calendar-blank"}`}><span>{day || ""}</span>{due.slice(0, 3).map(task => <button key={task.id} className={`calendar-task ${task.status === "done" ? "calendar-task-done" : ""}`} onClick={() => navigate("tasks")} title={task.title}>{task.title}</button>)}{due.length > 3 && <small>+{due.length - 3} more</small>}</div>;
+        const scheduled = day ? tasks.filter(task => task.scheduledAt?.slice(0, 10) === dateKey(day)) : [];
+        return <div key={`${day || "blank"}-${index}`} className={`calendar-day ${day && dateKey(day) === todayKey() ? "calendar-today" : ""} ${day ? "" : "calendar-blank"}`}><span>{day || ""}</span>{scheduled.slice(0, 2).map(task => <button key={`schedule-${task.id}`} className="calendar-task calendar-time-block" onClick={() => navigate("tasks")} title={`${task.title} · ${task.estimatedMinutes || 25} minutes`}>{new Date(task.scheduledAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · {task.title}</button>)}{due.slice(0, Math.max(0, 3 - scheduled.length)).map(task => <button key={task.id} className={`calendar-task ${task.status === "done" ? "calendar-task-done" : ""}`} onClick={() => navigate("tasks")} title={task.title}>{task.title}</button>)}{due.length + scheduled.length > 3 && <small>+{due.length + scheduled.length - 3} more</small>}</div>;
       })}</div>
-      {!tasks.some(task => task.dueDate) && <p className="calendar-hint">Add due dates to tasks to see them here.</p>}
+      {!tasks.some(task => task.dueDate || task.scheduledAt) && <p className="calendar-hint">Add due dates or schedule focus blocks on tasks to see them here.</p>}
     </div>
   </section>;
 }
@@ -569,14 +658,14 @@ function ProjectDetailPage({ project, tasks, notes, activity, openCreate, onEdit
     <PageIntro eyebrow="PROJECT SPACE" title={project.name} description={project.description || "A dedicated space for this project's tasks, notes, and progress."} action={<><button className="button button-secondary" onClick={onBack}>← All projects</button><button className="button button-primary" onClick={() => openCreate("task", project.id)}>＋ Add task</button><button className="button button-secondary" onClick={() => openCreate("note", project.id)}>＋ Add note</button></>} />
     <div className="project-detail-stats card-surface"><div><strong>{projectTasks.length}</strong><span>Tasks</span></div><div><strong>{completed}</strong><span>Completed</span></div><div><strong>{progress}%</strong><span>Progress</span></div><button className="button button-secondary" onClick={() => onEdit(project)}>Edit project</button></div>
     <div className="project-detail-grid">
-      <section><div className="section-heading"><h2>Tasks</h2></div><div className="task-list card-surface">{projectTasks.length ? projectTasks.map(task => <TaskRow key={task.id} task={task} projects={[project]} {...taskActions} />) : <EmptyState title="No tasks in this project yet" description="Add a next step to get moving." action={<button className="button button-secondary" onClick={() => openCreate("task", project.id)}>Add a task</button>} />}</div></section>
+      <section><div className="section-heading"><h2>Tasks</h2></div><div className="task-list card-surface">{projectTasks.length ? projectTasks.map(task => <TaskRow key={task.id} task={task} projects={[project]} allTasks={tasks} notes={notes} {...taskActions} />) : <EmptyState title="No tasks in this project yet" description="Add a next step to get moving." action={<button className="button button-secondary" onClick={() => openCreate("task", project.id)}>Add a task</button>} />}</div></section>
       <section><div className="section-heading"><h2>Project notes</h2></div><div className="project-note-list card-surface">{projectNotes.length ? projectNotes.map(note => <article className="project-note" key={note.id}><div><strong>{note.title}</strong><p>{note.body}</p></div><div><button className="row-edit" onClick={() => noteActions.onEdit(note)} aria-label={`Edit ${note.title}`}>✎</button><button className="row-delete" onClick={() => noteActions.onDelete(note.id)} aria-label={`Delete ${note.title}`}>×</button></div></article>) : <EmptyState title="Keep project thoughts together" description="Add notes from this project space to find them here." action={<button className="button button-secondary" onClick={() => openCreate("note", project.id)}>Add a note</button>} />}</div></section>
     </div>
     <ActivityPanel items={activity.filter(item => item.projectId === project.id).slice(0, 10)} />
   </section>;
 }
 
-function NotesPage({ notes, projects, openCreate, onDelete, onEdit }) {
+function NotesPage({ notes, projects, tasks, openCreate, onDelete, onEdit }) {
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("all");
   const [sort, setSort] = useState("updated");
@@ -601,7 +690,7 @@ function NotesPage({ notes, projects, openCreate, onDelete, onEdit }) {
       <div className="notes-grid">
         {visibleNotes.length ? visibleNotes.map(note => <article className="note-card card-surface" key={note.id}>
           <div className="note-card-top"><span className="note-symbol">✎</span><div><button className="row-edit" onClick={() => onEdit(note)} aria-label={`Edit ${note.title}`} title="Edit note">✎</button><button className="row-delete" onClick={() => onDelete(note.id)} aria-label={`Delete ${note.title}`} title="Delete note">×</button></div></div>
-          <h2>{note.title}</h2><p>{note.body || "A thought worth keeping."}</p>{note.projectId && projects.find(project => project.id === note.projectId) && <small>Project · {projects.find(project => project.id === note.projectId).name}</small>}<small>{new Date(note.updatedAt || note.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</small>
+          <h2>{note.title}</h2><p>{note.body || "A thought worth keeping."}</p>{note.projectId && projects.find(project => project.id === note.projectId) && <small>Project · {projects.find(project => project.id === note.projectId).name}</small>}{note.relatedTaskIds?.length > 0 && <small>Related tasks · {note.relatedTaskIds.map(id => tasks.find(task => task.id === id)?.title).filter(Boolean).join(", ")}</small>}<small>{new Date(note.updatedAt || note.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</small>
         </article>) : <div className="empty-card"><EmptyState icon="✎" title={notes.length ? "No notes match those filters." : "Save a thought for later."} description={notes.length ? "Try a different search or project." : "Keep a useful idea, a meeting note, or something you don’t want to forget."} action={notes.length ? <button className="button button-secondary" onClick={() => { setQuery(""); setProjectFilter("all"); }}>Clear filters</button> : <button className="button button-secondary" onClick={() => openCreate("note")}>＋ Write a note</button>} /></div>}
       </div>
     </section>
@@ -783,6 +872,7 @@ function SettingsPage({
 
 export default function App() {
   const [state, setState] = useState(EMPTY_STATE);
+  const [savedTaskViews, setSavedTaskViews] = useState(readSavedTaskViews);
   const [ready, setReady] = useState(false);
   const [syncSettings, setSyncSettingsState] = useState(readSyncSettings);
   const [syncSession, setSyncSession] = useState(readSupabaseSession);
@@ -952,6 +1042,8 @@ export default function App() {
         { id: makeId(), title: "A thought to come back to", body: "What would feel good to make progress on this week?", projectId, createdAt: now, updatedAt: now, sampleData: true }
       ],
       messages: [],
+      goals: [],
+      templates: [],
       activity: [
         { id: makeId(), label: "Sample workspace is ready to explore", projectId, createdAt: now, sampleData: true }
       ]
@@ -1098,6 +1190,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    const handleNotificationClick = event => {
+      if (event.data?.type !== "open-task" || !event.data.taskId) return;
+      const task = stateRef.current.tasks.find(item => item.id === event.data.taskId);
+      if (task) openEdit("task", task);
+      navigate("tasks");
+    };
+    navigator.serviceWorker.addEventListener("message", handleNotificationClick);
+    return () => navigator.serviceWorker.removeEventListener("message", handleNotificationClick);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const taskId = new URLSearchParams(window.location.search).get("task");
+    const task = state.tasks.find(item => item.id === taskId);
+    if (!task) return;
+    setCreateItem({ type: "task", record: task });
+    navigate("tasks");
+    window.history.replaceState({}, "", "/workspace");
+  }, [ready, state.tasks]);
+
+  useEffect(() => {
     function handleShortcuts(event) {
       if (document.querySelector("dialog[open]")) return;
       const key = event.key.toLowerCase();
@@ -1195,10 +1309,17 @@ export default function App() {
       notify(message);
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
         due.slice(0, 3).forEach(task => {
-          try {
-            new Notification("NexaFlow reminder", { body: task.title });
-          } catch (error) {
-            console.error("Could not show a browser reminder:", error);
+          const options = { body: task.title, tag: `nexaflow-reminder-${task.id}`, data: { taskId: task.id } };
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.ready.then(registration => registration.showNotification("NexaFlow reminder", options)).catch(error => {
+              console.error("Could not show a browser reminder:", error);
+            });
+          } else {
+            try {
+              new Notification("NexaFlow reminder", options);
+            } catch (error) {
+              console.error("Could not show a browser reminder:", error);
+            }
           }
         });
       }
@@ -1220,6 +1341,13 @@ export default function App() {
     if (!task) return;
     const status = requestedStatus || (task.status === "done" ? "todo" : "done");
     if (task.status === status) return;
+    if (status === "done") {
+      const blockedBy = (task.dependencyIds || []).map(dependencyId => state.tasks.find(item => item.id === dependencyId)).filter(item => item && item.status !== "done");
+      if (blockedBy.length) {
+        notify(`Complete these tasks first: ${blockedBy.map(item => item.title).join(", ")}.`, "error");
+        return;
+      }
+    }
     const recurringTask = task.status !== "done" && status === "done" ? nextRecurringTask(task) : null;
     const label = status === "done" ? "Completed" : task.status === "done" ? "Reopened" : "Updated";
     const next = {
@@ -1254,12 +1382,24 @@ export default function App() {
     onDelete: id => {
       const task = state.tasks.find(item => item.id === id);
       if (task && window.confirm(`Delete "${task.title}"?`)) {
-        setState(current => ({ ...current, activity: logActivity(current, `Deleted task: ${task.title}`, task.projectId), tasks: current.tasks.filter(item => item.id !== id) }));
-        offerUndo(`Deleted “${task.title}”`, current => ({
+        const linkedTasks = state.tasks.filter(item => item.dependencyIds?.includes(id) || item.relatedTaskIds?.includes(id));
+        const linkedNotes = state.notes.filter(item => item.relatedTaskIds?.includes(id));
+        setState(current => ({
           ...current,
-          tasks: current.tasks.some(item => item.id === task.id) ? current.tasks : [...current.tasks, task],
-          activity: logActivity(current, `Restored task: ${task.title}`, task.projectId)
+          activity: logActivity(current, `Deleted task: ${task.title}`, task.projectId),
+          tasks: current.tasks.filter(item => item.id !== id).map(item => ({ ...item, dependencyIds: (item.dependencyIds || []).filter(dependencyId => dependencyId !== id), relatedTaskIds: (item.relatedTaskIds || []).filter(taskId => taskId !== id) })),
+          notes: current.notes.map(item => ({ ...item, relatedTaskIds: (item.relatedTaskIds || []).filter(taskId => taskId !== id) }))
         }));
+        offerUndo(`Deleted “${task.title}”`, current => {
+          const restoredTasks = current.tasks.map(item => linkedTasks.find(previous => previous.id === item.id) || item);
+          if (!restoredTasks.some(item => item.id === task.id)) restoredTasks.push(task);
+          return {
+            ...current,
+            tasks: restoredTasks,
+            notes: current.notes.map(item => linkedNotes.find(note => note.id === item.id) || item),
+            activity: logActivity(current, `Restored task: ${task.title}`, task.projectId)
+          };
+        });
       }
     }
   }), [state]);
@@ -1281,6 +1421,45 @@ export default function App() {
 
   function openEdit(type, record) {
     setCreateItem({ type, record });
+  }
+
+  function saveTaskViews(views) {
+    try {
+      localStorage.setItem("nexaflow-saved-task-views", JSON.stringify(views));
+      setSavedTaskViews(views);
+    } catch (error) {
+      notify(`Could not save this task view: ${error.message}`, "error");
+    }
+  }
+
+  function updateSelectedTasks(ids, changes) {
+    const selected = new Set(ids);
+    if (changes.status === "done") {
+      const blocked = state.tasks.filter(task => selected.has(task.id) && (task.dependencyIds || []).some(id => !selected.has(id) && state.tasks.find(dependency => dependency.id === id)?.status !== "done"));
+      if (blocked.length) {
+        notify(`Complete dependencies first for: ${blocked.map(task => task.title).join(", ")}.`, "error");
+        return;
+      }
+    }
+    const normalizedChanges = changes.projectId === "__unassigned__" ? { ...changes, projectId: "" } : changes;
+    update(current => ({
+      ...current,
+      tasks: current.tasks.map(task => selected.has(task.id) ? { ...task, ...normalizedChanges } : task),
+      activity: logActivity(current, `Updated ${selected.size} selected tasks`)
+    }));
+    notify(`Updated ${selected.size} tasks.`);
+  }
+
+  function deleteSelectedTasks(ids) {
+    if (!ids.length || !window.confirm(`Delete ${ids.length} selected tasks?`)) return;
+    const selected = new Set(ids);
+    update(current => ({
+      ...current,
+      tasks: current.tasks.filter(task => !selected.has(task.id)).map(task => ({ ...task, dependencyIds: (task.dependencyIds || []).filter(id => !selected.has(id)), relatedTaskIds: (task.relatedTaskIds || []).filter(id => !selected.has(id)) })),
+      notes: current.notes.map(note => ({ ...note, relatedTaskIds: (note.relatedTaskIds || []).filter(id => !selected.has(id)) })),
+      activity: logActivity(current, `Deleted ${selected.size} selected tasks`)
+    }));
+    notify(`Deleted ${selected.size} tasks.`);
   }
 
   function startTimer() {
@@ -1321,29 +1500,32 @@ export default function App() {
         ...state,
         activity: logActivity(state, `Updated ${item.type}: ${item.title}`, item.projectId || (item.type === "project" ? item.id : "")),
         tasks: item.type === "task" ? state.tasks.map(task => task.id === item.id ? {
-          ...task, title: item.title, details: item.details, projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, status: item.status,
+          ...task, title: item.title, details: item.details, projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, status: item.status, dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes,
           subtasks: item.subtasks.map(title => {
             const existing = (task.subtasks || []).find(subtask => subtask.title === title);
             return { id: existing?.id || makeId(), title, done: existing?.done || false };
           })
         } : task) : state.tasks,
         projects: item.type === "project" ? state.projects.map(project => project.id === item.id ? { ...project, name: item.title, description: item.details, folder: item.folder, tags: item.tags } : project) : state.projects,
-        notes: item.type === "note" ? state.notes.map(note => note.id === item.id ? { ...note, title: item.title, body: item.details, projectId: item.projectId, updatedAt: now } : note) : state.notes
+        notes: item.type === "note" ? state.notes.map(note => note.id === item.id ? { ...note, title: item.title, body: item.details, projectId: item.projectId, relatedTaskIds: item.relatedTaskIds, updatedAt: now } : note) : item.type === "task" ? state.notes.map(note => ({ ...note, relatedTaskIds: item.relatedNoteIds.includes(note.id) ? [...new Set([...(note.relatedTaskIds || []), item.id])] : (note.relatedTaskIds || []).filter(taskId => taskId !== item.id) })) : state.notes
       };
+      if (item.type === "note") {
+        next.tasks = state.tasks.map(task => ({ ...task, relatedNoteIds: item.relatedTaskIds.includes(task.id) ? [...new Set([...(task.relatedNoteIds || []), item.id])] : (task.relatedNoteIds || []).filter(noteId => noteId !== item.id) }));
+      }
       setCreateItem(null);
       update(next);
       if (await persist(next)) notify(`${item.type} updated.`);
       return;
     }
-    const task = item.type === "task" ? { id: makeId(), title: item.title, details: item.details, status: "todo", projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, subtasks: item.subtasks.map(title => ({ id: makeId(), title, done: false })), createdAt: now } : null;
+    const task = item.type === "task" ? { id: makeId(), title: item.title, details: item.details, status: "todo", projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes, subtasks: item.subtasks.map(title => ({ id: makeId(), title, done: false })), createdAt: now } : null;
     const project = item.type === "project" ? { id: makeId(), name: item.title, description: item.details, folder: item.folder, tags: item.tags, createdAt: now } : null;
-    const note = item.type === "note" ? { id: makeId(), title: item.title, body: item.details, projectId: item.projectId, createdAt: now, updatedAt: now } : null;
+    const note = item.type === "note" ? { id: makeId(), title: item.title, body: item.details, projectId: item.projectId, relatedTaskIds: item.relatedTaskIds, createdAt: now, updatedAt: now } : null;
     const next = {
       ...state,
       activity: logActivity(state, `Created ${item.type}: ${item.title}`, item.projectId || project?.id || ""),
-      tasks: task ? [task, ...state.tasks] : state.tasks,
+      tasks: task ? [task, ...state.tasks] : item.type === "note" ? state.tasks.map(existing => ({ ...existing, relatedNoteIds: item.relatedTaskIds.includes(existing.id) ? [...new Set([...(existing.relatedNoteIds || []), note.id])] : (existing.relatedNoteIds || []).filter(noteId => noteId !== note.id) })) : state.tasks,
       projects: project ? [...state.projects, project] : state.projects,
-      notes: note ? [...state.notes, note] : state.notes
+      notes: note ? [...state.notes, note] : item.type === "task" ? state.notes.map(existing => ({ ...existing, relatedTaskIds: item.relatedNoteIds.includes(existing.id) ? [...new Set([...(existing.relatedTaskIds || []), task.id])] : (existing.relatedTaskIds || []).filter(taskId => taskId !== task.id) })) : state.notes
     };
     update(next);
     setCreateItem(null);
@@ -1394,18 +1576,21 @@ export default function App() {
     if (!project || !window.confirm(`Delete "${project.name}"? Its tasks will stay in your task list, but will no longer be linked to it.`)) return;
     const linkedTasks = state.tasks.filter(task => task.projectId === id);
     const linkedNotes = state.notes.filter(note => note.projectId === id);
+    const linkedGoals = (state.goals || []).filter(goal => goal.projectId === id);
     update(current => ({
       ...current,
       activity: logActivity(current, `Deleted project: ${project.name}`),
       projects: current.projects.filter(item => item.id !== id),
       tasks: current.tasks.map(task => task.projectId === id ? { ...task, projectId: "" } : task),
-      notes: current.notes.map(note => note.projectId === id ? { ...note, projectId: "" } : note)
+      notes: current.notes.map(note => note.projectId === id ? { ...note, projectId: "" } : note),
+      goals: (current.goals || []).map(goal => goal.projectId === id ? { ...goal, projectId: "" } : goal)
     }));
     offerUndo(`Deleted project “${project.name}”`, current => ({
       ...current,
       projects: current.projects.some(item => item.id === project.id) ? current.projects : [...current.projects, project],
       tasks: current.tasks.map(task => linkedTasks.find(item => item.id === task.id) || task),
       notes: current.notes.map(note => linkedNotes.find(item => item.id === note.id) || note),
+      goals: (current.goals || []).map(goal => linkedGoals.find(item => item.id === goal.id) || goal),
       activity: logActivity(current, `Restored project: ${project.name}`)
     }));
   }
@@ -1413,13 +1598,69 @@ export default function App() {
   function deleteNote(id) {
     const note = state.notes.find(item => item.id === id);
     if (note && window.confirm(`Delete "${note.title}"?`)) {
-      update(current => ({ ...current, activity: logActivity(current, `Deleted note: ${note.title}`), notes: current.notes.filter(item => item.id !== id) }));
+      update(current => ({ ...current, activity: logActivity(current, `Deleted note: ${note.title}`), notes: current.notes.filter(item => item.id !== id), tasks: current.tasks.map(task => ({ ...task, relatedNoteIds: (task.relatedNoteIds || []).filter(noteId => noteId !== id) })) }));
       offerUndo(`Deleted note “${note.title}”`, current => ({
         ...current,
         notes: current.notes.some(item => item.id === note.id) ? current.notes : [...current.notes, note],
+        tasks: current.tasks.map(task => note.relatedTaskIds?.includes(task.id) ? { ...task, relatedNoteIds: [...new Set([...(task.relatedNoteIds || []), note.id])] } : task),
         activity: logActivity(current, `Restored note: ${note.title}`)
       }));
     }
+  }
+
+  function createGoal(goal) {
+    update(current => ({ ...current, goals: [...(current.goals || []), goal], activity: logActivity(current, `Created goal: ${goal.title}`, goal.projectId) }));
+    notify("Goal added.");
+  }
+
+  function toggleGoalMilestone(goalId, milestoneId) {
+    update(current => ({
+      ...current,
+      goals: (current.goals || []).map(goal => goal.id !== goalId ? goal : {
+        ...goal,
+        milestones: goal.milestones.map(milestone => milestone.id === milestoneId ? { ...milestone, done: !milestone.done } : milestone)
+      })
+    }));
+  }
+
+  function addGoalMilestone(goalId, milestone) {
+    update(current => ({
+      ...current,
+      goals: (current.goals || []).map(goal => goal.id === goalId ? { ...goal, milestones: [...goal.milestones, milestone] } : goal)
+    }));
+  }
+
+  function deleteGoal(goalId) {
+    const goal = (state.goals || []).find(item => item.id === goalId);
+    if (!goal || !window.confirm(`Delete goal "${goal.title}"?`)) return;
+    update(current => ({ ...current, goals: current.goals.filter(item => item.id !== goalId), activity: logActivity(current, `Deleted goal: ${goal.title}`, goal.projectId) }));
+    notify("Goal deleted.");
+  }
+
+  function createTemplate(template) {
+    update(current => ({ ...current, templates: [...(current.templates || []), template], activity: logActivity(current, `Created ${template.type} template: ${template.title}`) }));
+    notify("Template saved.");
+  }
+
+  function deleteTemplate(templateId) {
+    update(current => ({ ...current, templates: (current.templates || []).filter(item => item.id !== templateId) }));
+    notify("Template deleted.");
+  }
+
+  function useTemplate(template) {
+    create({
+      type: template.type,
+      title: template.title,
+      details: template.details || "",
+      priority: template.priority || "medium",
+      estimatedMinutes: template.estimatedMinutes || 25,
+      subtasks: [],
+      tags: [],
+      dependencyIds: [],
+      relatedNoteIds: [],
+      relatedTaskIds: [],
+      status: "todo"
+    });
   }
 
   function removeSampleItems() {
@@ -1634,48 +1875,65 @@ export default function App() {
   }
 
   async function importBackup(imported, mode) {
-    const keys = ["projects", "tasks", "notes", "messages"];
-    if (!imported || keys.some(key => !Array.isArray(imported[key]) || imported[key].some(item => !item || typeof item !== "object" || Array.isArray(item)))) {
+    const requiredKeys = ["projects", "tasks", "notes", "messages"];
+    const keys = [...requiredKeys, "goals", "templates"];
+    if (!imported || requiredKeys.some(key => !Array.isArray(imported[key]) || imported[key].some(item => !item || typeof item !== "object" || Array.isArray(item))) ||
+      ["goals", "templates"].some(key => imported[key] !== undefined && (!Array.isArray(imported[key]) || imported[key].some(item => !item || typeof item !== "object" || Array.isArray(item))))) {
       throw new Error("The backup must contain valid projects, tasks, notes, and messages arrays.");
     }
-    if (imported.projects.some(item => typeof item.name !== "string") ||
-      imported.tasks.some(item => typeof item.title !== "string") ||
-      imported.notes.some(item => typeof item.title !== "string") ||
-      imported.messages.some(item => !["user", "assistant"].includes(item.role) || typeof item.content !== "string")) {
+    const source = { ...imported, goals: imported.goals || [], templates: imported.templates || [] };
+    if (source.projects.some(item => typeof item.name !== "string") ||
+      source.tasks.some(item => typeof item.title !== "string") ||
+      source.notes.some(item => typeof item.title !== "string") ||
+      source.messages.some(item => !["user", "assistant"].includes(item.role) || typeof item.content !== "string") ||
+      source.goals.some(item => typeof item.title !== "string" || (item.milestones !== undefined && !Array.isArray(item.milestones))) ||
+      source.templates.some(item => typeof item.title !== "string" || !["task", "project"].includes(item.type))) {
       throw new Error("The backup contains records with invalid or missing fields.");
     }
-    const records = Object.fromEntries(keys.map(key => [key, imported[key].map(item => {
-      const base = { ...item, id: item.id || makeId() };
-      if (key === "projects") return { ...base, tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === "string") : [] };
-      if (key === "tasks") return {
-        ...base,
-        status: ["todo", "in-progress", "done"].includes(item.status) ? item.status : "todo",
-        priority: ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium",
-        tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === "string") : [],
-        subtasks: Array.isArray(item.subtasks) ? item.subtasks.filter(subtask => subtask && typeof subtask.title === "string").map(subtask => ({ ...subtask, id: subtask.id || makeId(), done: Boolean(subtask.done) })) : []
-      };
-      return base;
-    })]));
     if (mode === "replace" && !window.confirm("Replace all current workspace data with this backup? This cannot be undone.")) return;
+    const idMaps = {};
+    const mappedId = (map, id) => id ? map.get(id) : undefined;
+    const records = Object.fromEntries(keys.map(key => {
+      const existingIds = new Set(mode === "replace" ? [] : (state[key] || []).map(item => item.id).filter(Boolean));
+      const mapped = source[key].map(item => {
+        const id = item.id && !existingIds.has(item.id) ? item.id : makeId();
+        existingIds.add(id);
+        return { ...item, id };
+      });
+      idMaps[key] = new Map(source[key].map((item, index) => [item.id, mapped[index].id]));
+      return [key, mapped];
+    }));
+    records.projects = records.projects.map(project => ({ ...project, tags: Array.isArray(project.tags) ? project.tags.filter(tag => typeof tag === "string") : [] }));
+    records.tasks = records.tasks.map((task, index) => ({
+      ...task,
+      projectId: mappedId(idMaps.projects, source.tasks[index].projectId) || "",
+      status: ["todo", "in-progress", "done"].includes(task.status) ? task.status : "todo",
+      priority: ["low", "medium", "high"].includes(task.priority) ? task.priority : "medium",
+      tags: Array.isArray(task.tags) ? task.tags.filter(tag => typeof tag === "string") : [],
+      dependencyIds: Array.isArray(task.dependencyIds) ? [...new Set(task.dependencyIds.map(id => mappedId(idMaps.tasks, id)).filter(Boolean))] : [],
+      relatedNoteIds: Array.isArray(task.relatedNoteIds) ? [...new Set(task.relatedNoteIds.map(id => mappedId(idMaps.notes, id)).filter(Boolean))] : [],
+      estimatedMinutes: Math.max(0, Math.min(1440, Number(task.estimatedMinutes) || 0)),
+      subtasks: Array.isArray(task.subtasks) ? task.subtasks.filter(subtask => subtask && typeof subtask.title === "string").map(subtask => ({ ...subtask, id: subtask.id || makeId(), done: Boolean(subtask.done) })) : []
+    }));
+    records.notes = records.notes.map((note, index) => ({
+      ...note,
+      projectId: mappedId(idMaps.projects, source.notes[index].projectId) || "",
+      relatedTaskIds: Array.isArray(note.relatedTaskIds) ? [...new Set(note.relatedTaskIds.map(id => mappedId(idMaps.tasks, id)).filter(Boolean))] : []
+    }));
+    records.goals = records.goals.map((goal, index) => ({
+      ...goal,
+      projectId: mappedId(idMaps.projects, source.goals[index].projectId) || "",
+      milestones: Array.isArray(goal.milestones) ? goal.milestones.filter(item => item && typeof item.title === "string").map(item => ({ ...item, id: item.id || makeId(), done: Boolean(item.done) })) : []
+    }));
     let next;
     if (mode === "replace") {
-      next = { ...EMPTY_STATE, ...records, activity: Array.isArray(imported.activity) ? imported.activity.filter(item => item && typeof item.label === "string") : [] };
+      next = { ...EMPTY_STATE, ...records, activity: Array.isArray(source.activity) ? source.activity.filter(item => item && typeof item.label === "string").map(item => ({ ...item, projectId: mappedId(idMaps.projects, item.projectId) || "" })) : [] };
     } else {
       next = { ...state };
       for (const key of keys) {
-        const existingIds = new Set(next[key].map(item => item.id).filter(Boolean));
-        const additions = records[key].map(item => {
-          if (!item.id || !existingIds.has(item.id)) {
-            if (item.id) existingIds.add(item.id);
-            return item;
-          }
-          const copy = { ...item, id: makeId() };
-          existingIds.add(copy.id);
-          return copy;
-        });
-        next[key] = [...next[key], ...additions];
+        next[key] = [...(next[key] || []), ...records[key]];
       }
-      next.activity = [...(next.activity || []), ...(Array.isArray(imported.activity) ? imported.activity.filter(item => item && typeof item.label === "string") : [])];
+      next.activity = [...(next.activity || []), ...(Array.isArray(source.activity) ? source.activity.filter(item => item && typeof item.label === "string").map(item => ({ ...item, projectId: mappedId(idMaps.projects, item.projectId) || "" })) : [])];
     }
     next.activity = logActivity(next, `${mode === "replace" ? "Replaced" : "Merged"} workspace from backup`);
     update(next);
@@ -1700,7 +1958,7 @@ export default function App() {
 
   const page = {
     overview: <Overview state={state} openCreate={openCreate} navigate={navigate} taskActions={taskActions} preferences={overviewPreferences} />,
-    tasks: <TasksPage tasks={state.tasks} projects={state.projects} openCreate={openCreate} taskActions={taskActions} />,
+    tasks: <TasksPage tasks={state.tasks} projects={state.projects} notes={state.notes} openCreate={openCreate} taskActions={taskActions} savedViews={savedTaskViews} onSaveView={saveTaskViews} onBulkUpdate={updateSelectedTasks} onBulkDelete={deleteSelectedTasks} />,
     board: <BoardPage tasks={state.tasks} projects={state.projects} taskActions={taskActions} />,
     calendar: <CalendarPage tasks={state.tasks} navigate={navigate} onExportCalendar={exportCalendar} />,
     focus: <FocusPage tasks={state.tasks} timer={timer} onStart={startTimer} onPause={pauseTimer} onReset={resetTimer} onTaskChange={taskId => setTimer(current => ({ ...current, taskId }))} />,
@@ -1708,7 +1966,9 @@ export default function App() {
     projects: <ProjectsPage projects={state.projects} tasks={state.tasks} openCreate={openCreate} onDelete={deleteProject} onEdit={project => openEdit("project", project)} onOpen={id => { setSelectedProjectId(id); navigate("projectDetail"); }} />,
     projectDetail: <ProjectDetailPage project={state.projects.find(item => item.id === selectedProjectId)} tasks={state.tasks} notes={state.notes} activity={state.activity || []} openCreate={openCreate} onEdit={project => openEdit("project", project)} onBack={() => navigate("projects")} taskActions={taskActions} noteActions={{ onEdit: note => openEdit("note", note), onDelete: deleteNote }} />,
     assistant: <AssistantPage messages={state.messages} aiConfigured={aiConfigured} syncMode={syncSettings.mode} onSend={sendMessage} onClear={clearChat} navigate={navigate} focusMessageId={focusMessageId} />,
-    notes: <NotesPage notes={state.notes} projects={state.projects} openCreate={openCreate} onDelete={deleteNote} onEdit={note => openEdit("note", note)} />,
+    notes: <NotesPage notes={state.notes} projects={state.projects} tasks={state.tasks} openCreate={openCreate} onDelete={deleteNote} onEdit={note => openEdit("note", note)} />,
+    goals: <GoalsPage goals={state.goals || []} projects={state.projects} onCreate={createGoal} onToggleMilestone={toggleGoalMilestone} onAddMilestone={addGoalMilestone} onDelete={deleteGoal} />,
+    templates: <TemplatesPage templates={state.templates || []} onCreate={createTemplate} onUse={useTemplate} onDelete={deleteTemplate} />,
     settings: <SettingsPage
       aiConfigured={aiConfigured}
       aiModel={aiModel}
@@ -1736,10 +1996,10 @@ export default function App() {
     <div className={`app-shell ${darkMode ? "theme-dark" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       {mobileNavOpen && <button className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" />}
       <aside id="workspace-navigation" className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
-        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span>Nexa<span className="brand-light">Flow</span></span></a>
+        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><img className="brand-logo-image" src="/icon.svg" alt="" /><span>Nexa<span className="brand-light">Flow</span></span></a>
         <div className="workspace-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace pages">
-          {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["tasks", "▤", "My tasks"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
+          {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["tasks", "▤", "My tasks"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"], ["goals", "✦", "Goals"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["templates", "▤", "Templates"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
             <div className="nav-group-label" aria-hidden="true">{group.title}</div>
             {group.items.map(([view, icon, label]) => <button key={view} className={`nav-item ${activeView === view || (view === "projects" && activeView === "projectDetail") ? "active" : ""}`} onClick={() => navigate(view)} title={label} aria-current={activeView === view || (view === "projects" && activeView === "projectDetail") ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icon}</span>{label}{view === "tasks" && <span className="nav-count">{openTaskCount}</span>}{view === "assistant" && <span className="ai-nav-dot" aria-label="AI assistant" />}</button>)}
           </div>)}
@@ -1762,7 +2022,7 @@ export default function App() {
           {page}
         </main>
       </div>
-      <CreateDialog key={`${createItem?.type || "closed"}-${createItem?.record?.id || ""}`} item={createItem} projects={state.projects} onClose={() => setCreateItem(null)} onCreate={create} />
+      <CreateDialog key={`${createItem?.type || "closed"}-${createItem?.record?.id || ""}`} item={createItem} projects={state.projects} tasks={state.tasks} notes={state.notes} onClose={() => setCreateItem(null)} onCreate={create} />
       {showFirstRun && <FirstRunDialog onStartSample={startSampleWorkspace} onStartBlank={finishFirstRun} />}
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} onCreate={openCreate} />}
       {toast && <div className={`toast visible ${toast.type}`} role="status" aria-live="polite"><span>{toast.message}</span>{toast.actionLabel && <button className="toast-action" onClick={undoLastChange}>{toast.actionLabel}</button>}</div>}

@@ -1,4 +1,4 @@
-const CACHE_NAME = "nexaflow-shell-v3";
+const CACHE_NAME = "nexaflow-shell-v4";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", event => {
@@ -14,6 +14,22 @@ self.addEventListener("install", event => {
 
 self.addEventListener("activate", event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim()));
+});
+
+self.addEventListener("notificationclick", event => {
+  const taskId = event.notification.data?.taskId;
+  event.notification.close();
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const client = clients.find(item => new URL(item.url).origin === self.location.origin);
+    if (client) {
+      await client.focus();
+      client.postMessage({ type: "open-task", taskId });
+      return;
+    }
+    const target = taskId ? `/workspace?task=${encodeURIComponent(taskId)}` : "/workspace";
+    await self.clients.openWindow(target);
+  })());
 });
 
 self.addEventListener("fetch", event => {
