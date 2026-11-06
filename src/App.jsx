@@ -1996,7 +1996,7 @@ export default function App() {
     <div className={`app-shell ${darkMode ? "theme-dark" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       {mobileNavOpen && <button className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" />}
       <aside id="workspace-navigation" className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
-        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span>Nexa<span className="brand-light">Flow</span></span></a>
+        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><img className="brand-logo-image" src="/icon.svg" alt="" /><span>Nexa<span className="brand-light">Flow</span></span></a>
         <div className="workspace-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace pages">
           {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["tasks", "▤", "My tasks"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"], ["goals", "✦", "Goals"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["templates", "▤", "Templates"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
