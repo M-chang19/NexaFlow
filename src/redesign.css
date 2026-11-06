@@ -356,14 +356,6 @@ h1 { font-size: clamp(32px, 3.2vw, 44px); letter-spacing: -1.9px; }
   .hero-card { border-radius: 17px; }
   .landing-header { height: 70px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .landing-page *, .landing-page *::before, .landing-page *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-  }
-}
-
 /* Editorial refresh: ink, warm paper, and a single vivid violet accent. */
 :root {
   --ink: #211d27;
@@ -751,3 +743,42 @@ body, .app-shell { background: radial-gradient(ellipse at 68% 7%, #ebe4f0 0, tra
   box-shadow: 0 12px 28px #08060d38, 0 2px 6px #08060d24, inset 0 1px #ffffff09;
 }
 .theme-dark .hero-card { box-shadow: 0 24px 48px #09060f75, inset 0 1px #ffffff1a; }
+
+@keyframes editorial-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes hero-glow {
+  0%, 100% { background-position: 0 0, 0 0, 0 0; }
+  50% { background-position: 4% -3%, -3% 3%, 0 0; }
+}
+.page-content { animation: editorial-enter .48s cubic-bezier(.2, .7, .25, 1) both; }
+.hero-card, .landing-hero-copy { animation: editorial-enter .65s cubic-bezier(.2, .7, .25, 1) both; }
+.overview-quick-actions > *, .stats-card, .focus-card, .task-list, .project-card, .note-card,
+.preview-frame, .landing-principles, .landing-feature, .landing-data {
+  animation: editorial-enter .55s cubic-bezier(.2, .7, .25, 1) both;
+}
+.overview-quick-actions > :nth-child(2), .landing-feature:nth-child(2) { animation-delay: 70ms; }
+.overview-quick-actions > :nth-child(3), .landing-feature:nth-child(3) { animation-delay: 140ms; }
+.landing-feature:nth-child(4), .landing-feature:nth-child(5), .landing-feature:nth-child(6) { animation-delay: 210ms; }
+.landing-hero { animation: hero-glow 18s ease-in-out infinite; background-size: 110% 110%, 110% 110%, 100% 100%; }
+.nav-item, .icon-button, .button, .landing-header-cta, .landing-primary-button,
+.landing-text-link, .overview-create-action, .landing-feature, .project-card, .note-card {
+  transition: color .2s ease, background-color .2s ease, border-color .2s ease,
+    box-shadow .25s ease, transform .25s cubic-bezier(.2, .7, .25, 1);
+}
+.button:hover, .landing-header-cta:hover, .landing-primary-button:hover { transform: translateY(-2px); }
+.landing-text-link:hover { transform: translateX(3px); }
+.nav-item:hover { transform: translateX(2px); }
+.icon-button:hover { transform: translateY(-1px); }
+.quick-action-icon { transition: transform .25s cubic-bezier(.2, .7, .25, 1); }
+.overview-create-action:hover .quick-action-icon { transform: scale(1.08) rotate(-4deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
