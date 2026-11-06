@@ -717,3 +717,37 @@ h1 { font-size: clamp(32px, 3.2vw, 43px); letter-spacing: -1.9px; }
   .hero-card { border-radius: 15px; }
   .landing-header { height: 70px; }
 }
+
+body, .app-shell { background: radial-gradient(ellipse at 68% 7%, #ebe4f0 0, transparent 34%), #f1ede6; }
+.sidebar { box-shadow: 8px 0 26px #17121e24; }
+.topbar { box-shadow: 0 4px 16px #2b21300b; }
+.overview-create-action, .card-surface, .settings-card, .calendar-card, .chat-card,
+.project-card, .note-card, .focus-timer-card, .template-card, .goal-card {
+  box-shadow: 0 10px 26px #30243d0d, 0 2px 5px #30243d08, inset 0 1px #ffffffc7;
+}
+.overview-create-action:hover, .project-card:hover, .note-card:hover, .template-card:hover, .goal-card:hover {
+  box-shadow: 0 15px 32px #30243d17, 0 3px 8px #30243d0c, inset 0 1px #ffffffd9;
+}
+.hero-card { box-shadow: 0 24px 48px #271c3538, inset 0 1px #ffffff18; }
+.landing-hero {
+  background:
+    radial-gradient(ellipse at 74% 40%, #79549a55 0, transparent 34%),
+    radial-gradient(ellipse at 16% 96%, #70446343 0, transparent 42%),
+    linear-gradient(145deg, #292130, #1d1822 70%);
+  box-shadow: inset 0 -28px 55px #130f1952;
+}
+.preview-frame { box-shadow: 0 40px 85px #100a186e, 0 8px 24px #100a1847, 0 0 0 1px #ffffff12; }
+.landing-principles, .landing-data {
+  box-shadow: 0 14px 34px #30243d10, inset 0 1px #ffffffd9;
+}
+.landing-feature { box-shadow: 0 12px 30px #30243d10, 0 2px 6px #30243d07, inset 0 1px #ffffffd9; }
+.landing-feature:hover { box-shadow: 0 19px 36px #30243d1b, 0 4px 9px #30243d0b, inset 0 1px #ffffffeb; }
+.theme-dark .main-column, .theme-dark .page-content {
+  background: radial-gradient(ellipse at 76% 0, #2c233344 0, transparent 38%), #17141b;
+}
+.theme-dark .topbar { box-shadow: 0 4px 18px #09070c55; }
+.theme-dark .card-surface, .theme-dark .settings-card, .theme-dark .calendar-card,
+.theme-dark .chat-card, .theme-dark .toolbar, .theme-dark .overview-create-action {
+  box-shadow: 0 12px 28px #08060d38, 0 2px 6px #08060d24, inset 0 1px #ffffff09;
+}
+.theme-dark .hero-card { box-shadow: 0 24px 48px #09060f75, inset 0 1px #ffffff1a; }
