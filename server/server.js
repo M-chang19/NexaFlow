@@ -12,7 +12,7 @@ const host = process.env.NEXAFLOW_HOST || "127.0.0.1";
 const port = Number(process.env.NEXAFLOW_PORT || 4317);
 const syncToken = process.env.NEXAFLOW_SYNC_TOKEN || "";
 const allowedOrigin = process.env.NEXAFLOW_ALLOWED_ORIGIN || "";
-const emptyState = { projects: [], tasks: [], notes: [], messages: [] };
+const emptyState = { projects: [], tasks: [], notes: [], messages: [], activity: [], goals: [], templates: [] };
 const allowedModes = new Set([
   "general problem-solving",
   "project planning and productivity",
@@ -110,6 +110,13 @@ async function readJson(request) {
 async function saveState(state) {
   for (const key of ["projects", "tasks", "notes", "messages"]) {
     if (!Array.isArray(state?.[key])) {
+      const error = new Error(`Workspace data is invalid: '${key}' must be an array.`);
+      error.status = 400;
+      throw error;
+    }
+  }
+  for (const key of ["activity", "goals", "templates"]) {
+    if (state?.[key] !== undefined && !Array.isArray(state[key])) {
       const error = new Error(`Workspace data is invalid: '${key}' must be an array.`);
       error.status = 400;
       throw error;
