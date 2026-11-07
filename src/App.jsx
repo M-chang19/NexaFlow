@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import SyncSettings from "./SyncSettings.jsx";
 import { createCalendarFile } from "./calendarExport.js";
 import { GoalsPage, TemplatesPage } from "./ProductivityPages.jsx";
+import { PlanMyDay, QuickCaptureInbox, WeeklyReview } from "./PlanningPages.jsx";
 import {
   authenticateSupabase,
   readSupabaseSession,
@@ -44,7 +45,10 @@ const VIEW_TITLES = {
   notes: "Notes",
   settings: "Settings",
   goals: "Goals & milestones",
-  templates: "Templates"
+  templates: "Templates",
+  dayPlan: "Plan my day",
+  inbox: "Quick-capture inbox",
+  weeklyReview: "Weekly review"
 };
 const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 function readSavedTaskViews() {
@@ -100,6 +104,8 @@ function nextRecurringTask(task) {
     ...task,
     id: makeId(),
     status: "todo",
+    inbox: false,
+    followUpDate: "",
     dueDate,
     reminderAt: reminderTime ? `${dueDate}T${reminderTime[1]}` : "",
     subtasks: (task.subtasks || []).map(subtask => ({ ...subtask, id: makeId(), done: false })),
@@ -149,12 +155,14 @@ function TaskRow({ task, projects, allTasks = [], notes = [], onToggle, onStatus
         <small>{project && <><span className="task-project-dot" />{project.name} · </>}{task.details || (task.status === "done" ? "Completed" : "No extra details")}{task.dueDate && <> · <span className={`task-due ${dueState}`}>{dueState === "overdue" ? "Overdue" : dueState === "due-today" ? "Due today" : `Due ${task.dueDate}`}</span></>}</small>
         {(task.priority || task.tags?.length > 0) && <div className="task-badges">{task.priority && <span className={`priority-badge priority-${task.priority}`}>{task.priority} priority</span>}{(task.tags || []).map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
         {blockedBy.length > 0 && <small className="task-dependency-note">Blocked by: {blockedBy.map(item => item.title).join(", ")}</small>}
+        {task.status === "waiting" && <small className="task-waiting-note">{task.followUpDate ? `Waiting · follow up ${task.followUpDate}` : "Waiting on someone or something"}</small>}
         {task.scheduledAt && <small className="task-schedule-note">◷ Scheduled {new Date(task.scheduledAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</small>}
         {linkedNotes.length > 0 && <small className="task-link-note">Linked notes: {linkedNotes.map(item => item.title).join(", ")}</small>}
       </div>
       <select className={`task-status status-${task.status}`} value={task.status} onChange={event => onStatus(task.id, event.target.value)} aria-label={`Status for ${task.title}`}>
         <option value="todo">To do</option>
         <option value="in-progress">In progress</option>
+        <option value="waiting">Waiting</option>
         <option value="done">Done</option>
       </select>
       <button className="row-edit" onClick={() => onEdit(task)} aria-label={`Edit ${task.title}`} title="Edit task">✎</button>
@@ -313,6 +321,8 @@ function CreateDialog({ item, projects, tasks, notes, onClose, onCreate }) {
       reminderAt: String(formData.get("reminderAt") || ""),
       priority: String(formData.get("priority") || "medium"),
       recurrence: String(formData.get("recurrence") || ""),
+      followUpDate: String(formData.get("followUpDate") || ""),
+      inbox: Boolean(formData.get("inbox")),
       tags: splitTags(String(formData.get("tags") || "")),
       subtasks: String(formData.get("subtasks") || "").split("\n").map(title => title.trim()).filter(Boolean).slice(0, 30),
       dependencyIds: formData.getAll("dependencyIds").map(String),
@@ -350,6 +360,8 @@ function CreateDialog({ item, projects, tasks, notes, onClose, onCreate }) {
             <label>Reminder (optional)<input name="reminderAt" type="datetime-local" defaultValue={item.record?.reminderAt ? item.record.reminderAt.slice(0, 16) : ""} /></label>
             <label>Schedule a focus block<input name="scheduledAt" type="datetime-local" defaultValue={item.record?.scheduledAt ? item.record.scheduledAt.slice(0, 16) : ""} /></label>
             <label>Estimated focus time (minutes)<input name="estimatedMinutes" type="number" min="0" max="1440" step="5" defaultValue={item.record?.estimatedMinutes || 25} /></label>
+            <label>Follow-up date (optional)<input name="followUpDate" type="date" defaultValue={item.record?.followUpDate || ""} /></label>
+            <label className="checkbox-field"><input name="inbox" type="checkbox" defaultChecked={Boolean(item.record?.inbox)} /> Keep in quick-capture inbox until triaged</label>
             {tasks.filter(task => task.id !== item.record?.id && !wouldCreateDependencyCycle(item.record?.id || "", task.id, tasks)).length > 0 && <label>Depends on (select one or more)
               <select name="dependencyIds" multiple size={Math.min(4, tasks.filter(task => task.id !== item.record?.id && !wouldCreateDependencyCycle(item.record?.id || "", task.id, tasks)).length)} defaultValue={item.record?.dependencyIds || []}>
                 {tasks.filter(task => task.id !== item.record?.id && !wouldCreateDependencyCycle(item.record?.id || "", task.id, tasks)).map(task => <option value={task.id} key={task.id}>{task.title}</option>)}
@@ -359,7 +371,7 @@ function CreateDialog({ item, projects, tasks, notes, onClose, onCreate }) {
               <select name="relatedNoteIds" multiple size={Math.min(4, notes.length)} defaultValue={item.record?.relatedNoteIds || []}>{notes.map(note => <option value={note.id} key={note.id}>{note.title}</option>)}</select>
             </label>}
             <label>Tags (comma-separated)<input name="tags" maxLength={240} defaultValue={(item.record?.tags || []).join(", ")} placeholder="design, launch, follow-up" /></label>
-            {item.record && <label>Status<select name="status" defaultValue={item.record.status}><option value="todo">To do</option><option value="in-progress">In progress</option><option value="done">Done</option></select></label>}
+            {item.record && <label>Status<select name="status" defaultValue={item.record.status}><option value="todo">To do</option><option value="in-progress">In progress</option><option value="waiting">Waiting</option><option value="done">Done</option></select></label>}
             <label>Subtasks (one per line)<textarea name="subtasks" rows="3" maxLength={1200} defaultValue={(item.record?.subtasks || []).map(subtask => subtask.title).join("\n")} placeholder={"Research options\nDraft the first version"} /></label>
           </>}
           {item.type === "project" && <>
@@ -484,7 +496,7 @@ function TasksPage({ tasks, projects, notes, openCreate, taskActions, savedViews
     <section className="view active">
       <PageIntro eyebrow="ONE THING AT A TIME" title="Your tasks" description="Keep the next steps small, clear, and moving." action={<button className="button button-primary" onClick={() => openCreate("task")}><span>＋</span> Add a task</button>} />
       <div className="toolbar card-surface"><div className="filter-tabs" role="group" aria-label="Filter tasks">
-        {[["all", `All ${tasks.length}`], ["todo", "To do"], ["in-progress", "In progress"], ["done", "Done"]].map(([value, label]) => <button key={value} className={`filter-tab ${filter === value ? "active" : ""}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
+        {[["all", `All ${tasks.length}`], ["todo", "To do"], ["in-progress", "In progress"], ["waiting", "Waiting"], ["done", "Done"]].map(([value, label]) => <button key={value} className={`filter-tab ${filter === value ? "active" : ""}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
       </div></div><div className="toolbar-extra">
         <label className="sort-field">Saved view<select value={activeSavedView} onChange={applySavedView}><option value="">Choose a view</option>{savedViews.map(view => <option value={view.id} key={view.id}>{view.name}</option>)}</select></label>
         <button className="clear-filters" onClick={saveCurrentView}>Save current view</button>
@@ -496,7 +508,7 @@ function TasksPage({ tasks, projects, notes, openCreate, taskActions, savedViews
         {hasFilters && <button className="clear-filters" onClick={() => { setQuery(""); setFilter("all"); setProjectFilter("all"); setPriorityFilter("all"); }}>Clear filters</button>}
       </div>
       {savedViews.length > 0 && activeSavedView && <button className="clear-filters" onClick={() => { onSaveView(savedViews.filter(view => view.id !== activeSavedView)); setActiveSavedView(""); }}>Delete saved view</button>}
-      {selectedIds.length > 0 && <div className="bulk-toolbar card-surface"><strong>{selectedIds.length} selected</strong><label>Status<select value="" onChange={event => { if (event.target.value) onBulkUpdate(selectedIds, { status: event.target.value }); setSelectedIds([]); }}><option value="">Set status…</option><option value="todo">To do</option><option value="in-progress">In progress</option><option value="done">Done</option></select></label><label>Priority<select value="" onChange={event => { if (event.target.value) onBulkUpdate(selectedIds, { priority: event.target.value }); setSelectedIds([]); }}><option value="">Set priority…</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Project<select value="" onChange={event => { if (event.target.value !== "") onBulkUpdate(selectedIds, { projectId: event.target.value }); setSelectedIds([]); }}><option value="">Move to project…</option><option value="__unassigned__">No project</option>{projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><button className="button button-secondary" onClick={() => { onBulkDelete(selectedIds); setSelectedIds([]); }}>Delete selected</button></div>}
+      {selectedIds.length > 0 && <div className="bulk-toolbar card-surface"><strong>{selectedIds.length} selected</strong><label>Status<select value="" onChange={event => { if (event.target.value) onBulkUpdate(selectedIds, { status: event.target.value }); setSelectedIds([]); }}><option value="">Set status…</option><option value="todo">To do</option><option value="in-progress">In progress</option><option value="waiting">Waiting</option><option value="done">Done</option></select></label><label>Priority<select value="" onChange={event => { if (event.target.value) onBulkUpdate(selectedIds, { priority: event.target.value }); setSelectedIds([]); }}><option value="">Set priority…</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Project<select value="" onChange={event => { if (event.target.value !== "") onBulkUpdate(selectedIds, { projectId: event.target.value }); setSelectedIds([]); }}><option value="">Move to project…</option><option value="__unassigned__">No project</option>{projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><button className="button button-secondary" onClick={() => { onBulkDelete(selectedIds); setSelectedIds([]); }}>Delete selected</button></div>}
       <div className="bulk-select-row"><label><input type="checkbox" checked={filtered.length > 0 && filtered.every(task => selectedIds.includes(task.id))} onChange={event => {
         const visibleIds = filtered.map(task => task.id);
         setSelectedIds(current => event.target.checked ? [...new Set([...current, ...visibleIds])] : current.filter(id => !visibleIds.includes(id)));
@@ -509,7 +521,7 @@ function TasksPage({ tasks, projects, notes, openCreate, taskActions, savedViews
 function BoardPage({ tasks, projects, taskActions }) {
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("all");
-  const columns = [["todo", "To do"], ["in-progress", "In progress"], ["done", "Done"]];
+  const columns = [["todo", "To do"], ["in-progress", "In progress"], ["waiting", "Waiting"], ["done", "Done"]];
   const visibleTasks = tasks.filter(task => (projectFilter === "all" || (projectFilter === "__unassigned__" ? !task.projectId : task.projectId === projectFilter)) &&
     `${task.title} ${task.details || ""} ${(task.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
   function dragStart(event, taskId) {
@@ -550,7 +562,7 @@ function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChange }) {
     <div className="focus-timer-card card-surface">
       <div className={`timer-ring ${timer.running ? "timer-running" : ""}`} style={{ "--timer-progress": `${360 * (1 - timer.remaining / (timer.duration * 60))}deg` }}><div><strong>{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</strong><span>{timer.running ? "FOCUS SESSION" : "READY WHEN YOU ARE"}</span></div></div>
       <h2>{selectedTask ? selectedTask.title : "Make a little room to focus"}</h2>
-      <label className="focus-task-select">Focus task<select value={timer.taskId} onChange={event => onTaskChange(event.target.value)} disabled={timer.running}><option value="">No specific task</option>{tasks.filter(task => task.status !== "done").map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select></label>
+      <label className="focus-task-select">Focus task<select value={timer.taskId} onChange={event => onTaskChange(event.target.value)} disabled={timer.running}><option value="">No specific task</option>{tasks.filter(task => task.status !== "done" && task.status !== "waiting" && !task.inbox).map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select></label>
       <div className="focus-duration"><button className={timer.duration === 25 ? "active" : ""} onClick={() => onReset(25)}>25 min</button><button className={timer.duration === 50 ? "active" : ""} onClick={() => onReset(50)}>50 min</button></div>
       <div className="focus-controls"><button className="button button-primary" onClick={timer.running ? onPause : onStart}>{timer.running ? "Pause session" : "Start focusing"}</button><button className="button button-secondary" onClick={() => onReset(timer.duration)}>Reset</button></div>
     </div>
@@ -633,12 +645,17 @@ function ProjectsPage({ projects, tasks, openCreate, onDelete, onEdit, onOpen })
         {visibleProjects.length ? visibleProjects.map((project, index) => {
           const projectTasks = tasks.filter(task => task.projectId === project.id);
           const completed = projectTasks.filter(task => task.status === "done").length;
+          const openProjectTasks = projectTasks.filter(task => task.status !== "done");
+          const overdueCount = openProjectTasks.filter(task => task.dueDate && task.dueDate < todayKey()).length;
+          const waitingCount = openProjectTasks.filter(task => task.status === "waiting").length;
+          const health = projectTasks.length === 0 ? "Not started" : overdueCount ? "At risk" : waitingCount ? "Waiting" : "On track";
           const progress = projectTasks.length ? Math.round(completed / projectTasks.length * 100) : 0;
           return <article className={`project-card card-surface ${palettes[index % palettes.length]}`} key={project.id}>
             <div className="project-card-top"><span className="project-symbol">{symbols[index % symbols.length]}</span><div><button className="row-edit" onClick={() => onEdit(project)} aria-label={`Edit ${project.name}`} title="Edit project">✎</button><button className="row-delete" onClick={() => onDelete(project.id)} aria-label={`Delete ${project.name}`} title="Delete project">×</button></div></div>
             <Eyebrow>{project.folder?.trim() || `PROJECT ${String(index + 1).padStart(2, "0")}`}</Eyebrow><h2>{project.name}</h2><p className="project-description">{project.description || "A new space for your ideas and next steps."}</p>
               {(project.tags || []).length > 0 && <div className="project-tags">{project.tags.map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
             <div className="project-progress-caption"><span>{projectTasks.length} {projectTasks.length === 1 ? "task" : "tasks"}</span><span>{progress}%</span></div><div className="progress-track"><div style={{ width: `${progress}%` }} /></div>
+            <div className={`project-health ${health === "At risk" ? "project-health-risk" : ""}`}><span>{health}</span>{overdueCount > 0 && <small>{overdueCount} overdue</small>}{waitingCount > 0 && <small>{waitingCount} waiting</small>}</div>
             <button className="project-add-task" onClick={() => onOpen(project.id)}>Open project details →</button>
             <button className="project-add-task" onClick={() => openCreate("task", project.id)}>＋ Add a task to this project</button>
           </article>;
@@ -1353,7 +1370,7 @@ export default function App() {
     const next = {
       ...state,
       activity: logActivity(state, `${label} task: ${task.title}`, task.projectId),
-      tasks: [...state.tasks.map(item => item.id === id ? { ...item, status } : item), ...(recurringTask ? [recurringTask] : [])]
+      tasks: [...state.tasks.map(item => item.id === id ? { ...item, status, inbox: status === "done" ? false : item.inbox } : item), ...(recurringTask ? [recurringTask] : [])]
     };
     setState(next);
     offerUndo(status === "done" ? `Completed “${task.title}”` : "Task status updated", current => ({
@@ -1444,7 +1461,7 @@ export default function App() {
     const normalizedChanges = changes.projectId === "__unassigned__" ? { ...changes, projectId: "" } : changes;
     update(current => ({
       ...current,
-      tasks: current.tasks.map(task => selected.has(task.id) ? { ...task, ...normalizedChanges } : task),
+      tasks: current.tasks.map(task => selected.has(task.id) ? { ...task, ...normalizedChanges, inbox: changes.status === "done" ? false : task.inbox } : task),
       activity: logActivity(current, `Updated ${selected.size} selected tasks`)
     }));
     notify(`Updated ${selected.size} tasks.`);
@@ -1500,7 +1517,7 @@ export default function App() {
         ...state,
         activity: logActivity(state, `Updated ${item.type}: ${item.title}`, item.projectId || (item.type === "project" ? item.id : "")),
         tasks: item.type === "task" ? state.tasks.map(task => task.id === item.id ? {
-          ...task, title: item.title, details: item.details, projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, status: item.status, dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes,
+          ...task, title: item.title, details: item.details, projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, status: item.status, followUpDate: item.followUpDate, inbox: item.inbox && item.status !== "done", dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes,
           subtasks: item.subtasks.map(title => {
             const existing = (task.subtasks || []).find(subtask => subtask.title === title);
             return { id: existing?.id || makeId(), title, done: existing?.done || false };
@@ -1517,7 +1534,7 @@ export default function App() {
       if (await persist(next)) notify(`${item.type} updated.`);
       return;
     }
-    const task = item.type === "task" ? { id: makeId(), title: item.title, details: item.details, status: "todo", projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes, subtasks: item.subtasks.map(title => ({ id: makeId(), title, done: false })), createdAt: now } : null;
+    const task = item.type === "task" ? { id: makeId(), title: item.title, details: item.details, status: "todo", projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, followUpDate: item.followUpDate, inbox: item.inbox, tags: item.tags, dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes, subtasks: item.subtasks.map(title => ({ id: makeId(), title, done: false })), createdAt: now } : null;
     const project = item.type === "project" ? { id: makeId(), name: item.title, description: item.details, folder: item.folder, tags: item.tags, createdAt: now } : null;
     const note = item.type === "note" ? { id: makeId(), title: item.title, body: item.details, projectId: item.projectId, relatedTaskIds: item.relatedTaskIds, createdAt: now, updatedAt: now } : null;
     const next = {
@@ -1537,6 +1554,67 @@ export default function App() {
     }
     const saved = await persist(next);
     if (saved) notify(`${item.type === "task" ? "Task" : item.type === "project" ? "Project" : "Note"} saved to this workspace.`);
+  }
+
+  async function captureTask(title) {
+    const task = {
+      id: makeId(),
+      title,
+      details: "",
+      status: "todo",
+      projectId: "",
+      dueDate: "",
+      priority: "medium",
+      inbox: true,
+      tags: [],
+      dependencyIds: [],
+      relatedNoteIds: [],
+      scheduledAt: "",
+      estimatedMinutes: 25,
+      subtasks: [],
+      createdAt: new Date().toISOString()
+    };
+    const next = {
+      ...state,
+      tasks: [task, ...state.tasks],
+      activity: logActivity(state, `Captured in inbox: ${title}`)
+    };
+    update(next);
+    if (await persist(next)) notify("Saved to your quick-capture inbox.");
+  }
+
+  async function scheduleDayPlan(proposed) {
+    const assignments = proposed.filter(item => {
+      const task = state.tasks.find(record => record.id === item.id);
+      return task && task.status !== "done" && task.status !== "waiting" && !task.inbox;
+    });
+    const scheduled = state.tasks.filter(task => task.status !== "done" && task.scheduledAt && !assignments.some(item => item.id === task.id));
+    const intervals = scheduled.map(task => ({
+      start: new Date(task.scheduledAt).getTime(),
+      end: new Date(task.scheduledAt).getTime() + Math.max(5, Number(task.estimatedMinutes) || 25) * 60000
+    }));
+    for (const assignment of assignments) {
+      const task = state.tasks.find(record => record.id === assignment.id);
+      const start = new Date(assignment.scheduledAt).getTime();
+      const end = start + Math.max(5, Number(task.estimatedMinutes) || 25) * 60000;
+      if (intervals.some(block => start < block.end && end > block.start)) {
+        notify("A focus block conflicts with this plan. Refresh the plan and try again.", "error");
+        return;
+      }
+      intervals.push({ start, end });
+    }
+    if (!assignments.length) {
+      notify("There are no available tasks to schedule.", "error");
+      return;
+    }
+    const byId = new Map(assignments.map(item => [item.id, item.scheduledAt]));
+    const next = {
+      ...state,
+      tasks: state.tasks.map(task => byId.has(task.id) ? { ...task, scheduledAt: byId.get(task.id) } : task),
+      activity: logActivity(state, `Scheduled ${assignments.length} tasks for today`)
+    };
+    update(next);
+    if (await persist(next)) notify(`Scheduled ${assignments.length} tasks for today.`);
   }
 
   async function sendMessage(prompt, mode) {
@@ -1907,7 +1985,9 @@ export default function App() {
     records.tasks = records.tasks.map((task, index) => ({
       ...task,
       projectId: mappedId(idMaps.projects, source.tasks[index].projectId) || "",
-      status: ["todo", "in-progress", "done"].includes(task.status) ? task.status : "todo",
+      status: ["todo", "in-progress", "waiting", "done"].includes(task.status) ? task.status : "todo",
+      followUpDate: typeof task.followUpDate === "string" ? task.followUpDate : "",
+      inbox: Boolean(task.inbox),
       priority: ["low", "medium", "high"].includes(task.priority) ? task.priority : "medium",
       tags: Array.isArray(task.tags) ? task.tags.filter(tag => typeof tag === "string") : [],
       dependencyIds: Array.isArray(task.dependencyIds) ? [...new Set(task.dependencyIds.map(id => mappedId(idMaps.tasks, id)).filter(Boolean))] : [],
@@ -1969,6 +2049,9 @@ export default function App() {
     notes: <NotesPage notes={state.notes} projects={state.projects} tasks={state.tasks} openCreate={openCreate} onDelete={deleteNote} onEdit={note => openEdit("note", note)} />,
     goals: <GoalsPage goals={state.goals || []} projects={state.projects} onCreate={createGoal} onToggleMilestone={toggleGoalMilestone} onAddMilestone={addGoalMilestone} onDelete={deleteGoal} />,
     templates: <TemplatesPage templates={state.templates || []} onCreate={createTemplate} onUse={useTemplate} onDelete={deleteTemplate} />,
+    dayPlan: <PlanMyDay tasks={state.tasks} onSchedule={scheduleDayPlan} navigate={navigate} />,
+    inbox: <QuickCaptureInbox tasks={state.tasks} onCapture={captureTask} onEdit={task => openEdit("task", task)} onComplete={id => taskActions.onStatus(id, "done")} onDelete={taskActions.onDelete} />,
+    weeklyReview: <WeeklyReview tasks={state.tasks} activity={state.activity || []} projects={state.projects} navigate={navigate} />,
     settings: <SettingsPage
       aiConfigured={aiConfigured}
       aiModel={aiModel}
@@ -1999,9 +2082,9 @@ export default function App() {
         <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><img className="brand-logo-image" src="/icon.svg" alt="" /><span>Nexa<span className="brand-light">Flow</span></span></a>
         <div className="workspace-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace pages">
-          {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["tasks", "▤", "My tasks"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"], ["goals", "✦", "Goals"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["templates", "▤", "Templates"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
+          {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["dayPlan", "◷", "Plan my day"], ["tasks", "▤", "My tasks"], ["inbox", "✦", "Quick capture"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"], ["goals", "✳", "Goals"], ["weeklyReview", "↻", "Weekly review"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["templates", "▤", "Templates"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
             <div className="nav-group-label" aria-hidden="true">{group.title}</div>
-            {group.items.map(([view, icon, label]) => <button key={view} className={`nav-item ${activeView === view || (view === "projects" && activeView === "projectDetail") ? "active" : ""}`} onClick={() => navigate(view)} title={label} aria-current={activeView === view || (view === "projects" && activeView === "projectDetail") ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icon}</span>{label}{view === "tasks" && <span className="nav-count">{openTaskCount}</span>}{view === "assistant" && <span className="ai-nav-dot" aria-label="AI assistant" />}</button>)}
+            {group.items.map(([view, icon, label]) => <button key={view} className={`nav-item ${activeView === view || (view === "projects" && activeView === "projectDetail") ? "active" : ""}`} onClick={() => navigate(view)} title={label} aria-current={activeView === view || (view === "projects" && activeView === "projectDetail") ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icon}</span>{label}{view === "tasks" && <span className="nav-count">{openTaskCount}</span>}{view === "inbox" && state.tasks.some(task => task.inbox && task.status !== "done") && <span className="nav-count">{state.tasks.filter(task => task.inbox && task.status !== "done").length}</span>}{view === "assistant" && <span className="ai-nav-dot" aria-label="AI assistant" />}</button>)}
           </div>)}
         </nav>
         <div className="sidebar-bottom">

@@ -1181,3 +1181,82 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .hero-card { border-radius: 12px; }
   .landing-header { height: 70px; }
 }
+
+.day-plan-controls { display: flex; align-items: end; gap: 18px; margin-bottom: 16px; padding: 18px; }
+.day-plan-controls label, .inbox-capture-form label { display: grid; gap: 7px; color: #77736f; font-size: 11px; font-weight: 650; }
+.day-plan-controls select, .day-plan-controls input, .inbox-capture-form input {
+  min-height: 39px;
+  padding: 0 11px;
+  border: 1px solid #e3dcd4;
+  border-radius: 9px;
+  background: #fffdf9;
+  color: var(--ink);
+}
+.day-plan-controls > span { margin-left: auto; padding-bottom: 10px; color: #6d5bd0; font-size: 12px; font-weight: 700; }
+.day-plan-list, .inbox-list, .review-section { padding: 8px 20px; }
+.day-plan-item, .inbox-item, .review-activity, .review-project {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-height: 68px;
+  border-bottom: 1px solid var(--line);
+}
+.day-plan-item:last-child, .inbox-item:last-child, .review-activity:last-child, .review-project:last-child { border-bottom: 0; }
+.day-plan-item > time { min-width: 56px; color: #6d5bd0; font-size: 12px; font-weight: 700; }
+.day-plan-item > div, .inbox-item > div:first-child { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.day-plan-item strong, .inbox-item strong, .review-project strong { color: #302d37; font-size: 12px; }
+.day-plan-item small, .inbox-item small, .review-project span { color: #8c8790; font-size: 10px; }
+.day-plan-item .row-edit { margin-left: auto; }
+.day-plan-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; }
+.day-plan-footer p, .planning-note { color: #88828c; font-size: 11px; line-height: 1.6; }
+.inbox-capture-form { display: grid; gap: 10px; margin-bottom: 16px; padding: 20px; }
+.inbox-capture-form > div { display: flex; gap: 10px; }
+.inbox-capture-form input { flex: 1; min-width: 0; }
+.inbox-actions { display: flex; align-items: center; gap: 8px; }
+.inbox-actions .button { min-height: 31px; padding-inline: 10px; }
+.review-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.review-summary article { display: grid; gap: 7px; padding: 18px; }
+.review-summary article > span { color: #89838e; font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+.review-summary article > strong { color: #4a3e83; font: 700 27px/1 "Manrope", sans-serif; }
+.review-summary article > small { color: #88828c; font-size: 10px; }
+.review-section { margin-bottom: 16px; padding-block: 18px; }
+.review-section .section-heading { margin-bottom: 8px; }
+.review-section .section-heading h2 { margin: 0; font-size: 17px; }
+.review-project { min-height: 52px; }
+.review-project strong { flex: 1; }
+.review-activity { justify-content: space-between; min-height: 47px; color: #5f5a64; font-size: 11px; }
+.review-activity time { flex: 0 0 auto; color: #918a94; font-size: 10px; }
+.project-health { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #547a4c; font-size: 10px; font-weight: 700; }
+.project-health::before { width: 7px; height: 7px; border-radius: 50%; background: #93c77b; content: ""; }
+.project-health-risk { color: #b06050; }
+.project-health-risk::before { background: #d98774; }
+.project-health small { color: #8c8790; font-size: 9px; font-weight: 500; }
+.task-waiting-note { color: #9c7139 !important; }
+.checkbox-field { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 9px !important; }
+.checkbox-field input { width: 16px; min-height: 16px !important; margin: 0; accent-color: #7562d9; }
+.status-waiting { background: #fff5e4; color: #986a2e; }
+
+.theme-dark .day-plan-controls select, .theme-dark .day-plan-controls input, .theme-dark .inbox-capture-form input {
+  border-color: #49404f;
+  background: #1d1922;
+  color: #eee9f2;
+}
+.theme-dark .day-plan-item strong, .theme-dark .inbox-item strong, .theme-dark .review-project strong { color: #eee9f2; }
+.theme-dark .day-plan-item, .theme-dark .inbox-item, .theme-dark .review-activity, .theme-dark .review-project { border-color: #3a333f; }
+.theme-dark .status-waiting { background: #493a26; color: #f0c77e; }
+
+@media (max-width: 760px) {
+  .review-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inbox-item { align-items: flex-start; flex-direction: column; padding-block: 14px; }
+  .inbox-actions { flex-wrap: wrap; }
+}
+@media (max-width: 540px) {
+  .day-plan-controls { align-items: stretch; flex-direction: column; gap: 12px; }
+  .day-plan-controls > span { margin-left: 0; padding-bottom: 0; }
+  .day-plan-footer { align-items: flex-start; flex-direction: column; }
+  .review-project { flex-wrap: wrap; gap: 7px 12px; padding-block: 10px; }
+  .review-project strong { flex-basis: 100%; }
+  .review-summary article { padding: 14px; }
+  .review-summary article > strong { font-size: 23px; }
+  .inbox-capture-form > div { align-items: stretch; flex-direction: column; }
+}
