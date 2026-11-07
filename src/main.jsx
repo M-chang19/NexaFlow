@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 import LandingPage from "./LandingPage.jsx";
 import "./styles.css";
+import "./redesign.css";
 
 const isWorkspace = window.location.pathname.replace(/\/+$/, "") === "/workspace";
 
