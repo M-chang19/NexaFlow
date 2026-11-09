@@ -62,11 +62,15 @@ Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduct
 Start Docker Desktop, then run from the project directory:
 
 ```powershell
+$token = node -p "require('node:crypto').randomBytes(32).toString('hex')"
+"NEXAFLOW_SYNC_TOKEN=$token" | Set-Content -Encoding ascii -NoNewline .env
 docker compose up --build -d
 docker compose ps
 ```
 
-Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduction, or [http://127.0.0.1:4317/workspace](http://127.0.0.1:4317/workspace) to go directly to the workspace. The service is published only on this computer, and workspace data is kept in the persistent `nexaflow-data` Docker volume.
+The generated token is stored in `.env`, which is excluded from source control. Keep it private and reuse the same `.env` when recreating the container. Compose publishes the app only on this computer; its exact loopback origin is trusted for the browser workspace, while other origins still need the sync token. Workspace data is kept in the persistent `nexaflow-data` Docker volume.
+
+Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduction, or [http://127.0.0.1:4317/workspace](http://127.0.0.1:4317/workspace) to go directly to the workspace.
 
 To stop the service, run `docker compose down`. The volume and its data are preserved; to remove them, run `docker compose down --volumes`.
 

@@ -1,8 +1,13 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import "./styles.css";
+import "./redesign.css";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import SyncSettings from "./SyncSettings.jsx";
 import { createCalendarFile } from "./calendarExport.js";
-import { GoalsPage, TemplatesPage } from "./ProductivityPages.jsx";
-import { PlanMyDay, QuickCaptureInbox, WeeklyReview } from "./PlanningPages.jsx";
+const GoalsPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.GoalsPage })));
+const TemplatesPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.TemplatesPage })));
+const PlanMyDay = lazy(() => import("./PlanningPages.jsx").then(module => ({ default: module.PlanMyDay })));
+const QuickCaptureInbox = lazy(() => import("./PlanningPages.jsx").then(module => ({ default: module.QuickCaptureInbox })));
+const WeeklyReview = lazy(() => import("./PlanningPages.jsx").then(module => ({ default: module.WeeklyReview })));
 import {
   authenticateSupabase,
   readSupabaseSession,
@@ -2102,7 +2107,7 @@ export default function App() {
         </header>
         <main className="page-content">
           {connectionError && <div className="connection-banner" role="status" aria-live="polite"><strong>Working in offline mode.</strong><span>{connectionError} Changes are saved in this browser and will sync when the local server is reachable again.</span><button className="button button-secondary" onClick={retryConnection}>Retry connection</button></div>}
-          {page}
+          <Suspense fallback={<div role="status">Loading {VIEW_TITLES[activeView]}…</div>}>{page}</Suspense>
         </main>
       </div>
       <CreateDialog key={`${createItem?.type || "closed"}-${createItem?.record?.id || ""}`} item={createItem} projects={state.projects} tasks={state.tasks} notes={state.notes} onClose={() => setCreateItem(null)} onCreate={create} />

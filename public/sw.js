@@ -1,13 +1,27 @@
-const CACHE_NAME = "nexaflow-shell-v4";
+const CACHE_NAME = "nexaflow-shell-v5";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
     await cache.addAll(APP_SHELL);
-    const html = await (await fetch("/")).text();
-    const assets = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:\?[^"']*)?)["']/g)].map(match => new URL(match[1], self.location.origin).href);
-    await cache.addAll(assets);
+    const pageResponse = await fetch("/");
+    if (!pageResponse.ok) throw new Error("NexaFlow could not cache the offline app shell.");
+    await cache.put("/workspace", pageResponse.clone());
+    const html = await pageResponse.text();
+    const assets = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:\?[^"']*)?)["']/g)]
+      .map(match => new URL(match[1], self.location.origin).href);
+    const manifestResponse = await fetch("/.vite/manifest.json");
+    if (manifestResponse.ok && manifestResponse.headers.get("content-type")?.includes("json")) {
+      const manifest = await manifestResponse.json();
+      for (const entry of Object.values(manifest)) {
+        if (entry.file) assets.push(new URL(`/${entry.file}`, self.location.origin).href);
+        for (const stylesheet of entry.css || []) {
+          assets.push(new URL(`/${stylesheet}`, self.location.origin).href);
+        }
+      }
+    }
+    await cache.addAll([...new Set(assets)]);
     await self.skipWaiting();
   })());
 });
@@ -40,10 +54,14 @@ self.addEventListener("fetch", event => {
     if (request.mode === "navigate") {
       try {
         const response = await fetch(request);
-        if (response.ok) await caches.open(CACHE_NAME).then(cache => cache.put("/", response.clone()));
+        if (response.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(url.pathname, response.clone());
+          if (url.pathname === "/") await cache.put("/workspace", response.clone());
+        }
         return response;
       } catch {
-        const cachedPage = await caches.match("/");
+        const cachedPage = await caches.match(url.pathname) || await caches.match("/");
         if (cachedPage) return cachedPage;
         throw new Error("NexaFlow is not available offline yet.");
       }
