@@ -10,7 +10,8 @@ export const DEFAULT_SYNC_SETTINGS = {
 
 function isValidWorkspace(value) {
   return value && typeof value === "object" && !Array.isArray(value) &&
-    ["projects", "tasks", "notes", "messages"].every(key => Array.isArray(value[key]));
+    ["projects", "tasks", "notes", "messages"].every(key => Array.isArray(value[key])) &&
+    ["activity", "goals", "templates"].every(key => value[key] === undefined || Array.isArray(value[key]));
 }
 
 export function readSyncSettings() {

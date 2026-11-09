@@ -11,11 +11,11 @@ NexaFlow is a local-first React workspace for projects, tasks, notes, and AI-ass
 - `dist\` — generated production build
 - Root files — app entry point, package/Vite configuration, Docker setup, and documentation
 
-Tasks support editing, priorities, tags, due dates, subtasks, daily/weekly/monthly recurrence, and timed reminders. Use the Kanban board to move tasks, Calendar to review due dates, global search to find tasks/projects/notes/conversation messages, and Activity to review workspace changes. Project detail pages group related tasks, notes, progress, and activity. The focus timer supports 25- and 50-minute sessions linked to tasks.
+Tasks support editing, priorities, tags, due dates, subtasks, daily/weekly/monthly recurrence, timed reminders, dependency tracking, linked notes, and scheduled focus blocks with estimated durations. Tasks can also be marked as waiting with an optional follow-up date, or captured in the quick-capture inbox and triaged later. The Plan my day page suggests a priority- and due-date-aware schedule within a chosen focus-time budget, avoiding blocks already on today's calendar. The task list supports bulk status, priority, and project changes, plus saved filter views. Use the Kanban board to move tasks, Calendar to review due dates and scheduled focus blocks, and global search to find tasks/projects/notes/conversation messages. Projects show a health indicator when tasks are overdue or waiting; the Weekly review page summarizes recent completions, upcoming work, and project attention areas. Project detail pages group related tasks, notes, progress, and activity. Goals can be linked to projects and tracked through milestones; reusable task and project templates are available from the sidebar. The focus timer supports 25- and 50-minute sessions linked to tasks.
 
 Projects can be grouped into user-named folders. The Projects, My tasks, Kanban board, Notes, and Activity pages include search or filtering controls to help find and sort workspace items.
 
-NexaFlow can be installed as a PWA from a supported browser and caches the application shell for offline use. Workspace changes made while the local API is unavailable are stored in the browser and synced when it reconnects. A save is only marked synced when the server confirms the latest local copy, so a newer edit made during a sync remains queued. Browser reminders require an open NexaFlow tab; missed reminders are checked when the app is opened again. Browsers do not provide reliable scheduled notifications after every app tab is closed without a push-notification service.
+NexaFlow can be installed as a PWA from a supported browser and caches the application shell for offline use. Workspace changes made while the local API is unavailable are stored in the browser and synced when it reconnects. A save is only marked synced when the server confirms the latest local copy, so a newer edit made during a sync remains queued. Browser reminders require an open NexaFlow tab; missed reminders are checked when the app is opened again. Clicking a reminder notification opens the related task when supported. Browsers do not provide reliable scheduled notifications after every app tab is closed without a push-notification service.
 
 The interface uses brief page and card entrance motion with subtle hover and press feedback. Animations are disabled when the operating system requests reduced motion.
 
@@ -64,11 +64,15 @@ Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduct
 Start Docker Desktop, then run from the project directory:
 
 ```powershell
+$token = node -p "require('node:crypto').randomBytes(32).toString('hex')"
+"NEXAFLOW_SYNC_TOKEN=$token" | Set-Content -Encoding ascii -NoNewline .env
 docker compose up --build -d
 docker compose ps
 ```
 
-Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduction, or [http://127.0.0.1:4317/workspace](http://127.0.0.1:4317/workspace) to go directly to the workspace. The service is published only on this computer, and workspace data is kept in the persistent `nexaflow-data` Docker volume.
+The generated token is stored in `.env`, which is excluded from source control. Keep it private and reuse the same `.env` when recreating the container. Compose publishes the app only on this computer; its exact loopback origin is trusted for the browser workspace, while other origins still need the sync token. Workspace data is kept in the persistent `nexaflow-data` Docker volume.
+
+Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduction, or [http://127.0.0.1:4317/workspace](http://127.0.0.1:4317/workspace) to go directly to the workspace.
 
 To stop the service, run `docker compose down`. The volume and its data are preserved; to remove them, run `docker compose down --volumes`.
 
