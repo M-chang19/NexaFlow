@@ -5,7 +5,18 @@ export default defineConfig({
   plugins: [react()],
   base: "./",
   build: {
-    manifest: true
+    manifest: true,
+    sourcemap: false,
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            return "vendor";
+          }
+        }
+      }
+    }
   },
   server: {
     proxy: {

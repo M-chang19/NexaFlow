@@ -1,6 +1,5 @@
-import "./styles.css";
 import "./redesign.css";
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Component, Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import SyncSettings from "./SyncSettings.jsx";
 import { createCalendarFile } from "./calendarExport.js";
 const GoalsPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.GoalsPage })));
@@ -143,7 +142,7 @@ function EmptyState({ icon = "✦", title, description, action }) {
   );
 }
 
-function TaskRow({ task, projects, allTasks = [], notes = [], onToggle, onStatus, onDelete, onToggleSubtask, onEdit }) {
+function TaskRow({ task, projects, allTasks = [], notes = [], onToggle, onStatus, onDelete, onToggleSubtask, onEdit, onDuplicate }) {
   const project = projects.find(item => item.id === task.projectId);
   const dependencies = (task.dependencyIds || []).map(id => allTasks.find(item => item.id === id)).filter(Boolean);
   const linkedNotes = (task.relatedNoteIds || []).map(id => notes.find(item => item.id === id)).filter(Boolean);
@@ -170,6 +169,7 @@ function TaskRow({ task, projects, allTasks = [], notes = [], onToggle, onStatus
         <option value="waiting">Waiting</option>
         <option value="done">Done</option>
       </select>
+      <button className="row-duplicate" onClick={() => onDuplicate(task)} aria-label={`Duplicate ${task.title}`} title="Duplicate task">⧉</button>
       <button className="row-edit" onClick={() => onEdit(task)} aria-label={`Edit ${task.title}`} title="Edit task">✎</button>
       <button className="row-delete" onClick={() => onDelete(task.id)} aria-label={`Delete ${task.title}`} title="Delete task">×</button>
     </div>
@@ -184,6 +184,42 @@ function PageIntro({ eyebrow, title, description, action, badge }) {
       <div><Eyebrow line>{eyebrow}</Eyebrow><h1>{title}</h1><p>{description}</p></div>
       {action}
       {badge}
+    </div>
+  );
+}
+
+class WorkspaceErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="error-boundary" role="alert">
+          <div className="error-card card-surface">
+            <Eyebrow>WORKSPACE ERROR</Eyebrow>
+            <h2>Something went wrong.</h2>
+            <p>The workspace could not render correctly. Refresh the page to try again.</p>
+            <button className="button button-primary" onClick={() => window.location.reload()}>Reload workspace</button>
+          </div>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function ConnectionStatus({ online }) {
+  return (
+    <div className={`network-status ${online ? "online" : "offline"}`} title={online ? "Connected" : "Offline mode"} aria-live="polite">
+      <span className="network-dot" aria-hidden="true" />
+      <span>{online ? "Online" : "Offline"}</span>
     </div>
   );
 }
@@ -916,6 +952,7 @@ export default function App() {
   const [focusMessageId, setFocusMessageId] = useState("");
   const [installPrompt, setInstallPrompt] = useState(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("nexaflow-theme") === "dark");
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [timer, setTimer] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("nexaflow-focus-timer") || "{}");
@@ -1198,8 +1235,16 @@ export default function App() {
       }
       if (localStorage.getItem("nexaflow-sync-dirty") === "true") persist(stateRef.current);
     };
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
     window.addEventListener("online", syncOfflineChanges);
-    return () => window.removeEventListener("online", syncOfflineChanges);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", syncOfflineChanges);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
 
   useEffect(() => {
@@ -1401,6 +1446,36 @@ export default function App() {
       };
     }),
     onEdit: task => setCreateItem({ type: "task", record: task }),
+    onDuplicate: task => {
+      const source = state.tasks.find(item => item.id === task.id);
+      if (!source) return;
+      const duplicateId = makeId();
+      const duplicate = {
+        ...source,
+        id: duplicateId,
+        title: `${source.title} (Copy)`,
+        status: source.status === "done" ? "todo" : source.status,
+        createdAt: new Date().toISOString(),
+        dependencyIds: [],
+        relatedTaskIds: [],
+        subtasks: (source.subtasks || []).map(subtask => ({ ...subtask, id: makeId(), done: false })),
+        reminderAt: source.reminderAt || "",
+        followUpDate: source.followUpDate || "",
+        scheduledAt: source.scheduledAt || "",
+        relatedNoteIds: [...(source.relatedNoteIds || [])]
+      };
+      update(current => ({
+        ...current,
+        activity: logActivity(current, `Duplicated task: ${source.title}`, source.projectId),
+        tasks: [duplicate, ...current.tasks]
+      }));
+      offerUndo(`Duplicated “${source.title}”`, current => ({
+        ...current,
+        tasks: current.tasks.filter(item => item.id !== duplicateId),
+        activity: logActivity(current, `Undid task duplication: ${source.title}`, source.projectId)
+      }));
+      notify(`Duplicated “${source.title}”.`);
+    },
     onDelete: id => {
       const task = state.tasks.find(item => item.id === id);
       if (task && window.confirm(`Delete "${task.title}"?`)) {
@@ -2081,7 +2156,8 @@ export default function App() {
   const openTaskCount = state.tasks.filter(task => task.status !== "done").length;
 
   return (
-    <div className={`app-shell ${darkMode ? "theme-dark" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
+    <WorkspaceErrorBoundary>
+      <div className={`app-shell ${darkMode ? "theme-dark" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       {mobileNavOpen && <button className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" />}
       <aside id="workspace-navigation" className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
         <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><img className="brand-logo-image" src="/icon.svg" alt="" /><span>Nexa<span className="brand-light">Flow</span></span></a>
@@ -2103,7 +2179,7 @@ export default function App() {
           <button className="mobile-nav-toggle" aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"} aria-expanded={mobileNavOpen} aria-controls="workspace-navigation" onClick={() => setMobileNavOpen(open => !open)}>{mobileNavOpen ? "×" : "☰"}</button>
           <div className="breadcrumb" aria-label={`Current page: ${VIEW_TITLES[activeView]}`}><span>My workspace</span><span className="breadcrumb-slash">/</span><strong>{VIEW_TITLES[activeView]}</strong></div>
           <div className="global-search-wrap"><input ref={searchInputRef} value={globalQuery} onChange={event => setGlobalQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setGlobalQuery(""); }} placeholder="Search everything…" title="Search everything (Ctrl/Cmd + K)" aria-label="Search tasks, projects, notes and messages. Press Control or Command K to focus search." /><SearchResults query={globalQuery} state={state} onChoose={chooseSearchResult} /></div>
-          <div className="topbar-actions">{installPrompt && <button className="install-button" onClick={installApp}>Install app</button>}<div className={`save-indicator ${saveStatus.kind}`} role="status" aria-live="polite" title={connectionError || "Your workspace save status"}><span className="save-dot" /><span>{saveStatus.label}</span></div><button className="icon-button" onClick={() => setShowShortcuts(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button><button className="icon-button" onClick={() => navigate("settings")} aria-label="Settings" title="Settings">⚙</button><div className="avatar avatar-small" aria-label="My workspace">N</div></div>
+          <div className="topbar-actions">{installPrompt && <button className="install-button" onClick={installApp}>Install app</button>}<ConnectionStatus online={isOnline} /><div className={`save-indicator ${saveStatus.kind}`} role="status" aria-live="polite" title={connectionError || "Your workspace save status"}><span className="save-dot" /><span>{saveStatus.label}</span></div><button className="icon-button" onClick={() => setShowShortcuts(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button><button className="icon-button" onClick={() => navigate("settings")} aria-label="Settings" title="Settings">⚙</button><div className="avatar avatar-small" aria-label="My workspace">N</div></div>
         </header>
         <main className="page-content">
           {connectionError && <div className="connection-banner" role="status" aria-live="polite"><strong>Working in offline mode.</strong><span>{connectionError} Changes are saved in this browser and will sync when the local server is reachable again.</span><button className="button button-secondary" onClick={retryConnection}>Retry connection</button></div>}
@@ -2115,5 +2191,6 @@ export default function App() {
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} onCreate={openCreate} />}
       {toast && <div className={`toast visible ${toast.type}`} role="status" aria-live="polite"><span>{toast.message}</span>{toast.actionLabel && <button className="toast-action" onClick={undoLastChange}>{toast.actionLabel}</button>}</div>}
     </div>
+    </WorkspaceErrorBoundary>
   );
 }
