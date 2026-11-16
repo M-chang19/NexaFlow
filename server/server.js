@@ -12,7 +12,8 @@ const host = process.env.NEXAFLOW_HOST || "127.0.0.1";
 const port = Number(process.env.NEXAFLOW_PORT || 4317);
 const syncToken = process.env.NEXAFLOW_SYNC_TOKEN || "";
 const allowedOrigin = process.env.NEXAFLOW_ALLOWED_ORIGIN || "";
-const emptyState = { projects: [], tasks: [], notes: [], messages: [] };
+const trustedLocalOrigin = process.env.NEXAFLOW_TRUSTED_LOCAL_ORIGIN || "";
+const emptyState = { projects: [], tasks: [], notes: [], messages: [], activity: [], goals: [], templates: [] };
 const allowedModes = new Set([
   "general problem-solving",
   "project planning and productivity",
@@ -50,9 +51,16 @@ function isLoopbackAddress(address = "") {
   return address === "::1" || address === "127.0.0.1" || address.startsWith("::ffff:127.");
 }
 
-function isLocalRequest(request) {
+function isTrustedLocalOriginRequest(request) {
+  if (!trustedLocalOrigin) return false;
   const origin = request.headers.origin;
-  if (!isLoopbackAddress(request.socket.remoteAddress)) return false;
+  return request.headers.host?.toLowerCase() === new URL(trustedLocalOrigin).host.toLowerCase() &&
+    (!origin || origin === trustedLocalOrigin);
+}
+
+function isLocalRequest(request) {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) return isTrustedLocalOriginRequest(request);
+  const origin = request.headers.origin;
   if (!origin) return true;
   try {
     const hostname = new URL(origin).hostname.replace(/^\[|\]$/g, "");
@@ -110,6 +118,13 @@ async function readJson(request) {
 async function saveState(state) {
   for (const key of ["projects", "tasks", "notes", "messages"]) {
     if (!Array.isArray(state?.[key])) {
+      const error = new Error(`Workspace data is invalid: '${key}' must be an array.`);
+      error.status = 400;
+      throw error;
+    }
+  }
+  for (const key of ["activity", "goals", "templates"]) {
+    if (state?.[key] !== undefined && !Array.isArray(state[key])) {
       const error = new Error(`Workspace data is invalid: '${key}' must be an array.`);
       error.status = 400;
       throw error;
@@ -289,6 +304,19 @@ const server = createServer(async (request, response) => {
 });
 
 await ensureWorkspace();
+if (trustedLocalOrigin) {
+  let localOrigin;
+  try {
+    localOrigin = new URL(trustedLocalOrigin);
+  } catch {
+    throw new Error("NEXAFLOW_TRUSTED_LOCAL_ORIGIN must be a valid loopback origin.");
+  }
+  if (!["http:", "https:"].includes(localOrigin.protocol) ||
+      !isLoopbackAddress(localOrigin.hostname.replace(/^\[|\]$/g, "")) ||
+      localOrigin.origin !== trustedLocalOrigin) {
+    throw new Error("NEXAFLOW_TRUSTED_LOCAL_ORIGIN must be an exact HTTP(S) loopback origin without a path.");
+  }
+}
 if (!["127.0.0.1", "localhost", "::1"].includes(host) && !syncToken) {
   throw new Error("Set NEXAFLOW_SYNC_TOKEN before binding the workspace API to a network interface.");
 }

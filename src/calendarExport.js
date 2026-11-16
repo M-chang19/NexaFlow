@@ -55,15 +55,15 @@ function makeEvent(lines) {
 }
 
 export function createCalendarFile(tasks) {
-  const datedTasks = tasks.filter(task => task.status !== "done" && (task.dueDate || task.reminderAt));
-  if (!datedTasks.length) throw new Error("Add a due date or reminder to a task before exporting calendar events.");
+  const datedTasks = tasks.filter(task => task.status !== "done" && (task.dueDate || task.reminderAt || task.scheduledAt));
+  if (!datedTasks.length) throw new Error("Add a due date, schedule, or reminder to a task before exporting calendar events.");
   if (datedTasks.some(task => task.dueDate && !isValidCalendarDate(task.dueDate))) {
     throw new Error("A task has an invalid due date. Fix it before exporting the calendar.");
   }
 
   const stamp = utcTimestamp(new Date());
   const events = datedTasks.flatMap(task => {
-    const details = [task.details, task.dueDate ? `Due date: ${task.dueDate}` : ""].filter(Boolean).join("\n");
+    const details = [task.details, task.dueDate ? `Due date: ${task.dueDate}` : "", task.scheduledAt ? `Focus block: ${task.estimatedMinutes || 25} minutes` : ""].filter(Boolean).join("\n");
     const eventId = String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9._-]/g, "-");
     const dueEvent = task.dueDate ? makeEvent([
       `UID:${eventId}-due@nexaflow`,
@@ -88,17 +88,24 @@ export function createCalendarFile(tasks) {
       "TRIGGER:PT0S",
       "END:VALARM"
     ]) : null;
-    return [dueEvent, reminderEvent].filter(Boolean);
+    const scheduleEvent = task.scheduledAt ? makeEvent([
+      `UID:${eventId}-focus@nexaflow`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${utcTimestamp(task.scheduledAt)}`,
+      `DTEND:${utcTimestamp(new Date(new Date(task.scheduledAt).getTime() + (task.estimatedMinutes || 25) * 60 * 1000))}`,
+      `SUMMARY:${escapeCalendarText(`Focus: ${task.title}`)}`,
+      `DESCRIPTION:${escapeCalendarText(details)}`,
+      "CATEGORIES:NexaFlow,Focus"
+    ]) : null;
+    return [dueEvent, reminderEvent, scheduleEvent].filter(Boolean);
   });
 
-  return [
+  const calendarHeaders = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//NexaFlow//Task Calendar//EN",
     "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    ...events,
-    "END:VCALENDAR",
-    ""
-  ].map(foldLine).join("\r\n");
+    "METHOD:PUBLISH"
+  ].map(foldLine);
+  return [...calendarHeaders, ...events, foldLine("END:VCALENDAR"), ""].join("\r\n");
 }
