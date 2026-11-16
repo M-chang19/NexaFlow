@@ -5,7 +5,8 @@ const dateKey = (value = new Date()) => {
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 10);
 };
-const todayKey = () => dateKey();
+const todayKey = (value = new Date()) => dateKey(value);
+const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const priorityRank = { high: 0, medium: 1, low: 2 };
 
@@ -52,11 +53,45 @@ function planTasks(tasks, availableMinutes, startTime) {
   return plan;
 }
 
-export function PlanMyDay({ tasks, onSchedule, navigate }) {
+export function PlanMyDay({ state, tasks, update, persist, notify, logActivity, navigate }) {
   const [availableMinutes, setAvailableMinutes] = useState(180);
   const [startTime, setStartTime] = useState("09:00");
   const plan = useMemo(() => planTasks(tasks, availableMinutes, startTime), [tasks, availableMinutes, startTime]);
   const today = todayKey();
+
+  async function schedulePlan(proposed) {
+    const assignments = proposed.filter(item => {
+      const task = tasks.find(record => record.id === item.id);
+      return task && task.status !== "done" && task.status !== "waiting" && !task.inbox;
+    });
+    const scheduled = tasks.filter(task => task.status !== "done" && task.scheduledAt && !assignments.some(item => item.id === task.id));
+    const intervals = scheduled.map(task => ({
+      start: new Date(task.scheduledAt).getTime(),
+      end: new Date(task.scheduledAt).getTime() + Math.max(5, Number(task.estimatedMinutes) || 25) * 60000
+    }));
+    for (const assignment of assignments) {
+      const task = tasks.find(record => record.id === assignment.id);
+      const start = new Date(assignment.scheduledAt).getTime();
+      const end = start + Math.max(5, Number(task.estimatedMinutes) || 25) * 60000;
+      if (intervals.some(block => start < block.end && end > block.start)) {
+        notify("A focus block conflicts with this plan. Refresh the plan and try again.", "error");
+        return;
+      }
+      intervals.push({ start, end });
+    }
+    if (!assignments.length) {
+      notify("There are no available tasks to schedule.", "error");
+      return;
+    }
+    const byId = new Map(assignments.map(item => [item.id, item.scheduledAt]));
+    const next = {
+      ...state,
+      tasks: tasks.map(task => byId.has(task.id) ? { ...task, scheduledAt: byId.get(task.id) } : task),
+      activity: logActivity(state, `Scheduled ${assignments.length} tasks for today`)
+    };
+    update(next);
+    if (await persist(next)) notify(`Scheduled ${assignments.length} tasks for today.`);
+  }
 
   return <section className="view active">
     <div className="page-intro"><div><p className="eyebrow">A REALISTIC PLAN FOR TODAY</p><h1>Plan my day</h1><p>Choose a little time and NexaFlow will suggest a focused, priority-first plan.</p></div></div>
@@ -72,19 +107,46 @@ export function PlanMyDay({ tasks, onSchedule, navigate }) {
         <button className="row-edit" onClick={() => navigate("tasks")} aria-label={`Open task list for ${task.title}`}>↗</button>
       </article>) : <div className="empty-state"><span className="empty-icon">◷</span><strong>No tasks fit this plan yet</strong><p>Add or triage a task, or increase your available focus time.</p><button className="button button-secondary" onClick={() => navigate("tasks")}>View tasks</button></div>}
     </div>
-    {plan.length > 0 && <div className="day-plan-footer"><p>Suggested times avoid focus blocks already on today’s calendar.</p><button className="button button-primary" onClick={() => onSchedule(plan.map(item => ({ id: item.task.id, scheduledAt: item.scheduledAt })))}>Schedule this plan</button></div>}
+    {plan.length > 0 && <div className="day-plan-footer"><p>Suggested times avoid focus blocks already on today’s calendar.</p><button className="button button-primary" onClick={() => schedulePlan(plan.map(item => ({ id: item.task.id, scheduledAt: item.scheduledAt })))}>Schedule this plan</button></div>}
     {tasks.some(task => task.status !== "done" && task.scheduledAt && dateKey(task.scheduledAt) === today) && <p className="planning-note">Tasks already scheduled today are left in place and their time is reserved.</p>}
   </section>;
 }
 
-export function QuickCaptureInbox({ tasks, onCapture, onEdit, onComplete, onDelete }) {
+export function QuickCaptureInbox({ state, tasks, update, persist, notify, logActivity, onEdit, onComplete, onDelete }) {
   const [title, setTitle] = useState("");
   const inboxTasks = tasks.filter(task => task.inbox && task.status !== "done");
+  async function captureTask(capturedTitle) {
+    const task = {
+      id: makeId(),
+      title: capturedTitle,
+      details: "",
+      status: "todo",
+      projectId: "",
+      dueDate: "",
+      priority: "medium",
+      inbox: true,
+      tags: [],
+      dependencyIds: [],
+      relatedNoteIds: [],
+      scheduledAt: "",
+      estimatedMinutes: 25,
+      subtasks: [],
+      createdAt: new Date().toISOString()
+    };
+    const next = {
+      ...state,
+      tasks: [task, ...tasks],
+      activity: logActivity(state, `Captured in inbox: ${capturedTitle}`)
+    };
+    update(next);
+    if (await persist(next)) notify("Saved to your quick-capture inbox.");
+  }
+
   function submit(event) {
     event.preventDefault();
     const value = title.trim();
     if (!value) return;
-    onCapture(value);
+    captureTask(value);
     setTitle("");
   }
 
