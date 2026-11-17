@@ -55,7 +55,7 @@ npm run build
 npm start
 ```
 
-Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduction, or [http://127.0.0.1:4317/workspace](http://127.0.0.1:4317/workspace) to go directly to the workspace.
+Open [http://127.0.0.1:4318/](http://127.0.0.1:4318/) for the NexaFlow introduction, or [http://127.0.0.1:4318/workspace](http://127.0.0.1:4318/workspace) to go directly to the workspace.
 
 ## Docker
 
@@ -70,7 +70,7 @@ docker compose ps
 
 The generated token is stored in `.env`, which is excluded from source control. Keep it private and reuse the same `.env` when recreating the container. Compose publishes the app only on this computer; its exact loopback origin is trusted for the browser workspace, while other origins still need the sync token. Workspace data is kept in the persistent `nexaflow-data` Docker volume.
 
-Open [http://127.0.0.1:4317/](http://127.0.0.1:4317/) for the NexaFlow introduction, or [http://127.0.0.1:4317/workspace](http://127.0.0.1:4317/workspace) to go directly to the workspace.
+Open [http://127.0.0.1:4318/](http://127.0.0.1:4318/) for the NexaFlow introduction, or [http://127.0.0.1:4318/workspace](http://127.0.0.1:4318/workspace) to go directly to the workspace.
 
 To stop the service, run `docker compose down`. The volume and its data are preserved; to remove them, run `docker compose down --volumes`.
 
@@ -143,5 +143,5 @@ The Supabase project URL, publishable/anon key, session, and self-hosted sync to
 - If `node` is not recognized, close and reopen VS Code after installing Node.js, then check `node --version` in a new terminal.
 - If dependency installation fails, confirm that npm can access the package registry and retry `npm install`.
 - If the app cannot connect, keep the `npm run dev` terminal running and open `http://127.0.0.1:5173/`.
-- If port 4317 or 5173 is already in use, stop the other local service using that port.
+- If port 4318 or 5173 is already in use, stop the other local service using that port or configure another port with `$env:NEXAFLOW_PORT = "4319"`.
 - If AI is unavailable, check the provider base URL, model, API key, and network access.

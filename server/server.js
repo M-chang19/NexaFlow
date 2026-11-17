@@ -9,7 +9,7 @@ const dataDirectory = path.join(root, "data");
 const dataPath = path.join(dataDirectory, "nexaflow.json");
 const buildDirectory = path.join(root, "dist");
 const host = process.env.NEXAFLOW_HOST || "127.0.0.1";
-const port = Number(process.env.NEXAFLOW_PORT || 4317);
+const port = Number(process.env.NEXAFLOW_PORT || 4318);
 const syncToken = process.env.NEXAFLOW_SYNC_TOKEN || "";
 const allowedOrigin = process.env.NEXAFLOW_ALLOWED_ORIGIN || "";
 const trustedLocalOrigin = process.env.NEXAFLOW_TRUSTED_LOCAL_ORIGIN || "";
@@ -320,6 +320,15 @@ if (trustedLocalOrigin) {
 if (!["127.0.0.1", "localhost", "::1"].includes(host) && !syncToken) {
   throw new Error("Set NEXAFLOW_SYNC_TOKEN before binding the workspace API to a network interface.");
 }
+server.on("error", error => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`Port ${port} is already in use. You can specify another port with NEXAFLOW_PORT=<port>.`);
+  } else {
+    console.error(`Server error: ${error.message}`);
+  }
+  process.exit(1);
+});
+
 server.listen(port, host, () => {
   console.log(`NexaFlow local API: http://${host}:${port}`);
   console.log(`Workspace data: ${dataPath}`);
