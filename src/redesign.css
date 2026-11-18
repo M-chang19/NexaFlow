@@ -6297,3 +6297,360 @@ select:focus-visible {
   border-color: #374151;
   color: #e2e8f0;
 }
+
+
+/* ==========================================================================
+   PRODUCTIVITY XP & LEVEL SYSTEM
+   ========================================================================== */
+
+.welcome-right-col {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.xp-level-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  min-width: 170px;
+}
+
+.xp-badge-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.xp-badge-icon {
+  font-size: 1.15rem;
+}
+
+.xp-badge-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.xp-badge-info strong {
+  font-size: 0.84rem;
+  color: #0f172a;
+}
+
+.xp-badge-info small {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.xp-progress-bar {
+  width: 100%;
+  height: 5px;
+  background: #e2e8f0;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.xp-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #06b6d4);
+  border-radius: 9999px;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ==========================================================================
+   VOICE DICTATION IN QUICK-ADD
+   ========================================================================== */
+
+.quick-add-voice-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  transition: all 0.15s;
+}
+
+.quick-add-voice-btn:hover {
+  background: #f1f5f9;
+  border-color: #6366f1;
+}
+
+.quick-add-voice-btn.listening {
+  background: #fef2f2;
+  border-color: #ef4444;
+  animation: pulseVoice 1.2s infinite ease-in-out;
+}
+
+@keyframes pulseVoice {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { transform: scale(1.08); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* ==========================================================================
+   KANBAN DROP TARGET ENHANCEMENT
+   ========================================================================== */
+
+.kanban-column-drop-target {
+  border-color: #6366f1 !important;
+  background: rgba(99, 102, 241, 0.04) !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25) inset;
+  transition: all 0.15s ease-out;
+}
+
+.kanban-task[draggable="true"] {
+  cursor: grab;
+}
+
+.kanban-task[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* ==========================================================================
+   MARKDOWN VIEWER & SPLIT EDITOR
+   ========================================================================== */
+
+.note-editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.note-mode-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.note-toolbar-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.note-mode-buttons {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.note-mode-btn {
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.note-mode-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.note-editor-panes {
+  display: grid;
+  gap: 12px;
+}
+
+.note-editor-panes.mode-split {
+  grid-template-columns: 1fr 1fr;
+}
+
+.note-editor-panes.mode-write {
+  grid-template-columns: 1fr;
+}
+
+.note-editor-panes.mode-preview {
+  grid-template-columns: 1fr;
+}
+
+.note-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.note-textarea:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.note-live-preview {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 14px;
+  max-height: 250px;
+  overflow-y: auto;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.note-card-markdown {
+  margin: 8px 0;
+  font-size: 0.85rem;
+  color: #334155;
+  line-height: 1.5;
+}
+
+/* Markdown typography */
+.markdown-body {
+  color: #1e293b;
+}
+
+.md-h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 10px 0 6px;
+  color: #0f172a;
+}
+
+.md-h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 8px 0 4px;
+  color: #0f172a;
+}
+
+.md-h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 6px 0 3px;
+  color: #1e293b;
+}
+
+.md-paragraph {
+  margin: 4px 0;
+}
+
+.md-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+  font-size: 0.86rem;
+}
+
+.md-checklist-item.checked span {
+  text-decoration: line-through;
+  color: #94a3b8;
+}
+
+.md-checkbox {
+  accent-color: #6366f1;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.md-list-item {
+  margin-left: 18px;
+  margin-bottom: 2px;
+}
+
+.md-blockquote {
+  border-left: 3px solid #6366f1;
+  padding-left: 10px;
+  margin: 6px 0;
+  color: #64748b;
+  font-style: italic;
+}
+
+.md-code-block {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.md-inline-code {
+  background: #f1f5f9;
+  color: #4f46e5;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-family: monospace;
+}
+
+.md-spacer {
+  height: 6px;
+}
+
+/* Dark Mode Overrides for New Features */
+.theme-dark .xp-level-badge {
+  background: #111827;
+  border-color: #1f2937;
+}
+
+.theme-dark .xp-badge-info strong {
+  color: #f1f5f9;
+}
+
+.theme-dark .xp-progress-bar {
+  background: #1f2937;
+}
+
+.theme-dark .quick-add-voice-btn {
+  background: #1f2937;
+  border-color: #374151;
+  color: #f1f5f9;
+}
+
+.theme-dark .note-mode-buttons {
+  background: #1f2937;
+}
+
+.theme-dark .note-mode-btn.active {
+  background: #374151;
+  color: #f1f5f9;
+}
+
+.theme-dark .note-live-preview {
+  background: #0b0f19;
+  border-color: #1f2937;
+}
+
+.theme-dark .markdown-body,
+.theme-dark .md-h1,
+.theme-dark .md-h2,
+.theme-dark .md-h3 {
+  color: #f1f5f9;
+}
+
+.theme-dark .md-inline-code {
+  background: #1f2937;
+  color: #a5b4fc;
+}
+
+.theme-dark .note-card-markdown {
+  color: #cbd5e1;
+}

@@ -1,11 +1,13 @@
 // src/NaturalLanguageQuickAdd.jsx
-// Smart Quick-Add Bar with real-time natural language parsing
-import { useMemo, useState } from "react";
+// Smart Quick-Add Bar with real-time natural language parsing & voice dictation
+import { useMemo, useRef, useState } from "react";
 import { parseNaturalLanguageTask } from "./naturalLanguage.js";
 
 export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
   const [text, setText] = useState("");
   const [showTips, setShowTips] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
 
   const parsed = useMemo(() => {
     return parseNaturalLanguageTask(text, projects);
@@ -13,6 +15,55 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
 
   const hasContent = Boolean(text.trim());
   const selectedProject = projects.find(p => p.id === parsed.projectId);
+
+  // Web Speech API Voice Dictation
+  function toggleVoice() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Try Chrome or Edge!");
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = event => {
+        const transcript = event.results[0][0].transcript;
+        if (transcript) {
+          setText(prev => (prev ? `${prev} ${transcript}` : transcript));
+        }
+        setIsListening(false);
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  }
 
   const handleSubmit = e => {
     e.preventDefault();
@@ -39,10 +90,18 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
           <input
             type="text"
             className="quick-add-input"
-            placeholder="Quick-add task... e.g. “Prepare slide deck tomorrow !high #work @Design” (Press Enter)"
+            placeholder={isListening ? "Listening... Speak now..." : "Quick-add task... e.g. “Prepare slide deck tomorrow !high #work @Design” (Press Enter)"}
             value={text}
             onChange={e => setText(e.target.value)}
           />
+          <button
+            type="button"
+            className={`quick-add-voice-btn ${isListening ? "listening" : ""}`}
+            onClick={toggleVoice}
+            title={isListening ? "Stop listening" : "Voice dictation (Click to speak)"}
+          >
+            {isListening ? "🔴" : "🎙️"}
+          </button>
           <button
             type="button"
             className="quick-add-tips-btn"

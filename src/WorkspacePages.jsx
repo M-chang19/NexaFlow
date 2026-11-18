@@ -4,6 +4,8 @@ import { Component, useEffect, useMemo, useRef, useState } from "react";
 import { ProductivityHeatmap } from "./ProductivityHeatmap.jsx";
 import { NaturalLanguageQuickAdd } from "./NaturalLanguageQuickAdd.jsx";
 import { soundEngine } from "./SoundEngine.js";
+import { ProductivityLevelBadge, triggerConfetti } from "./Gamification.jsx";
+import { MarkdownViewer } from "./MarkdownViewer.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Constants and helpers                                               */
@@ -395,7 +397,10 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
           <h1>{greeting}. <span className="headline-accent">Let’s make progress.</span></h1>
           <p className="welcome-copy">{open.length} open {open.length === 1 ? "task" : "tasks"} across {state.projects.length} {state.projects.length === 1 ? "project" : "projects"}.</p>
         </div>
-        <div className="date-pill"><span className="date-icon" aria-hidden="true">▦</span><span><small>Today</small>{new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</span></div>
+        <div className="welcome-right-col">
+          <ProductivityLevelBadge tasks={state.tasks} activity={state.activity || []} notes={state.notes || []} />
+          <div className="date-pill"><span className="date-icon" aria-hidden="true">▦</span><span><small>Today</small>{new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</span></div>
+        </div>
       </div>
       <div className="overview-quick-actions">
         {[["task", "quick-task", "＋", "New task", "Capture the next step"], ["project", "quick-project", "▧", "New project", "Group related work"], ["note", "quick-note", "✎", "New note", "Write something down"]].map(([type, tone, icon, title, hint]) => (
@@ -560,7 +565,17 @@ export function BoardPage({ tasks, projects, taskActions, openCreate }) {
               aria-label={label}
               onDragOver={event => { event.preventDefault(); setOverColumn(status); }}
               onDragLeave={() => setOverColumn("")}
-              onDrop={event => { event.preventDefault(); setOverColumn(""); const id = event.dataTransfer.getData("text/plain"); if (id) taskActions.onStatus(id, status); }}
+              onDrop={event => {
+                event.preventDefault();
+                setOverColumn("");
+                const id = event.dataTransfer.getData("text/plain");
+                if (id) {
+                  taskActions.onStatus(id, status);
+                  if (status === "done") {
+                    triggerConfetti();
+                  }
+                }
+              }}
             >
               <div className="kanban-column-heading">
                 <div className="kanban-column-title-wrap">
@@ -1119,7 +1134,9 @@ export function NotesPage({ notes, projects, tasks, openCreate, onDelete, onEdit
                   <span className="note-symbol" aria-hidden="true">✎</span>
                   <h2>{note.title}</h2>
                   {projectName(projects, note.projectId) && <small>{projectName(projects, note.projectId)}</small>}
-                  <p>{(note.body || "").length > 220 ? `${note.body.slice(0, 220)}…` : note.body}</p>
+                  <div className="note-card-markdown">
+                    <MarkdownViewer content={(note.body || "").length > 250 ? `${note.body.slice(0, 250)}…` : note.body} />
+                  </div>
                   {linked.length > 0 && <div className="task-badges">{linked.map(task => <span className="tag-chip" key={task.id}>{task.title}</span>)}</div>}
                   <small>Updated {formatDateTime(note.updatedAt || note.createdAt)}</small>
                   <div className="task-row-actions">
@@ -1296,6 +1313,7 @@ function CreateForm({ item, projects, tasks, notes, onClose, onCreate }) {
   const initial = item.initialValues || {};
   const isEdit = Boolean(record);
   const [error, setError] = useState("");
+  const [noteMode, setNoteMode] = useState("split");
   const [form, setForm] = useState(() => ({
     title: (record ? (record.title ?? record.name) : initial.title) || "",
     details: (record ? (type === "project" ? record.description : type === "note" ? record.body : record.details) : initial.details) || "",
@@ -1381,7 +1399,44 @@ function CreateForm({ item, projects, tasks, notes, onClose, onCreate }) {
         <h2>{isEdit ? "Edit" : "New"} {type}</h2>
         {error && <p className="task-waiting-note" role="alert">{error}</p>}
         <label>{type === "project" ? "Project name" : "Title"}<input autoFocus value={form.title} onChange={set("title")} /></label>
-        <label>{type === "note" ? "Note" : "Description"}<textarea rows={type === "note" ? 6 : 3} value={form.details} onChange={set("details")} /></label>
+
+        {type === "note" ? (
+          <div className="note-editor-wrapper">
+            <div className="note-mode-toolbar">
+              <span className="note-toolbar-label">Markdown Note</span>
+              <div className="note-mode-buttons">
+                {["write", "split", "preview"].map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`note-mode-btn ${noteMode === mode ? "active" : ""}`}
+                    onClick={() => setNoteMode(mode)}
+                  >
+                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className={`note-editor-panes mode-${noteMode}`}>
+              {(noteMode === "write" || noteMode === "split") && (
+                <textarea
+                  rows={8}
+                  className="note-textarea"
+                  value={form.details}
+                  onChange={set("details")}
+                  placeholder="Write your note in Markdown... (# Heading, - [ ] Checklist, **bold**, `code`)"
+                />
+              )}
+              {(noteMode === "preview" || noteMode === "split") && (
+                <div className="note-live-preview">
+                  <MarkdownViewer content={form.details || "*No content yet. Type on the left to preview...*"} />
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <label>Description<textarea rows={3} value={form.details} onChange={set("details")} /></label>
+        )}
 
         {type !== "project" && (
           <label>Project

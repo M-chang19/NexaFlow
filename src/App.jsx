@@ -24,6 +24,7 @@ import {
   WorkspaceErrorBoundary
 } from "./WorkspacePages.jsx";
 import { CommandPalette } from "./CommandPalette.jsx";
+import { triggerConfetti } from "./Gamification.jsx";
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createCalendarFile } from "./calendarExport.js";
 const GoalsPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.GoalsPage })));
@@ -649,6 +650,9 @@ export default function App() {
         notify(`Complete these tasks first: ${blockedBy.map(item => item.title).join(", ")}.`, "error");
         return;
       }
+    }
+    if (status === "done") {
+      triggerConfetti();
     }
     const recurringTask = task.status !== "done" && status === "done" ? nextRecurringTask(task) : null;
     const label = status === "done" ? "Completed" : task.status === "done" ? "Reopened" : "Updated";
