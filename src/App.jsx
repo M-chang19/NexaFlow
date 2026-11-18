@@ -23,6 +23,7 @@ import {
   todayKey,
   WorkspaceErrorBoundary
 } from "./WorkspacePages.jsx";
+import { CommandPalette } from "./CommandPalette.jsx";
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createCalendarFile } from "./calendarExport.js";
 const GoalsPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.GoalsPage })));
@@ -150,7 +151,19 @@ async function api(path, options = {}) {
 
 
 export default function App() {
-  const [state, setState] = useState(EMPTY_STATE);
+  const [state, setState] = useState(() => {
+    try {
+      const cached = localStorage.getItem("nexaflow-workspace-cache");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object") {
+          return { ...EMPTY_STATE, ...parsed };
+        }
+      }
+    } catch {}
+    return EMPTY_STATE;
+  });
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [savedTaskViews, setSavedTaskViews] = useState(readSavedTaskViews);
   const [ready, setReady] = useState(false);
   const [syncSettings, setSyncSettingsState] = useState(readSyncSettings);
@@ -506,7 +519,7 @@ export default function App() {
       const commandKey = event.ctrlKey || event.metaKey;
       if (commandKey && key === "k") {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        setCommandPaletteOpen(open => !open);
         return;
       }
       if (event.altKey && event.shiftKey && ["t", "p", "n"].includes(key)) {
@@ -1325,7 +1338,17 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-nav-toggle" aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"} aria-expanded={mobileNavOpen} aria-controls="workspace-navigation" onClick={() => setMobileNavOpen(open => !open)}>{mobileNavOpen ? "×" : "☰"}</button>
           <div className="breadcrumb" aria-label={`Current page: ${VIEW_TITLES[activeView]}`}><span>My workspace</span><span className="breadcrumb-slash">/</span><strong>{VIEW_TITLES[activeView]}</strong></div>
-          <div className="global-search-wrap"><input ref={searchInputRef} value={globalQuery} onChange={event => setGlobalQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setGlobalQuery(""); }} placeholder="Search everything…" title="Search everything (Ctrl/Cmd + K)" aria-label="Search tasks, projects, notes and messages. Press Control or Command K to focus search." /><SearchResults query={globalQuery} state={state} onChoose={chooseSearchResult} /></div>
+          <button
+            className="command-bar-trigger"
+            onClick={() => setCommandPaletteOpen(true)}
+            title="Open Command Palette (Ctrl+K / Cmd+K)"
+            aria-label="Open Command Palette"
+          >
+            <span className="command-bar-icon" aria-hidden="true">⌘</span>
+            <span className="command-bar-text">Search tasks, projects, actions…</span>
+            <kbd className="command-bar-kbd">Ctrl K</kbd>
+          </button>
+          <div className="global-search-wrap"><input ref={searchInputRef} value={globalQuery} onChange={event => setGlobalQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setGlobalQuery(""); }} placeholder="Filter…" title="Quick filter" aria-label="Quick filter" /><SearchResults query={globalQuery} state={state} onChoose={chooseSearchResult} /></div>
           <div className="topbar-actions">{installPrompt && <button className="install-button" onClick={installApp}>Install app</button>}<ConnectionStatus online={isOnline} /><div className={`save-indicator ${saveStatus.kind}`} role="status" aria-live="polite" title={connectionError || "Your workspace save status"}><span className="save-dot" /><span>{saveStatus.label}</span></div><button className="icon-button" onClick={() => setShowShortcuts(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button><button className="icon-button" onClick={() => navigate("settings")} aria-label="Settings" title="Settings">⚙</button><div className="avatar avatar-small" aria-label="My workspace">N</div></div>
         </header>
         <main className="page-content">
@@ -1337,6 +1360,16 @@ export default function App() {
       {showFirstRun && <FirstRunDialog onStartSample={startSampleWorkspace} onStartBlank={finishFirstRun} />}
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} onCreate={openCreate} />}
       {toast && <div className={`toast visible ${toast.type}`} role="status" aria-live="polite"><span>{toast.message}</span>{toast.actionLabel && <button className="toast-action" onClick={undoLastChange}>{toast.actionLabel}</button>}</div>}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        navigate={navigate}
+        state={state}
+        openCreate={openCreate}
+        onToggleTheme={toggleTheme}
+        onStartFocus={() => setTimer(current => ({ ...current, running: true }))}
+        darkMode={darkMode}
+      />
     </div>
     </WorkspaceErrorBoundary>
   );

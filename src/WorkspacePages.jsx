@@ -1,6 +1,9 @@
 // src/WorkspacePages.jsx
 // Rebuilt from App.jsx's usage and styled with the class names in redesign.css.
 import { Component, useEffect, useMemo, useRef, useState } from "react";
+import { ProductivityHeatmap } from "./ProductivityHeatmap.jsx";
+import { NaturalLanguageQuickAdd } from "./NaturalLanguageQuickAdd.jsx";
+import { soundEngine } from "./SoundEngine.js";
 
 /* ------------------------------------------------------------------ */
 /* Constants and helpers                                               */
@@ -403,6 +406,7 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
           </button>
         ))}
       </div>
+      <ProductivityHeatmap tasks={state.tasks} activity={state.activity || []} />
       <div className="overview-grid">
         <div className="overview-main">{renderGroup(OVERVIEW_GROUPS.main)}</div>
         <div className="overview-side">{renderGroup(OVERVIEW_GROUPS.side)}</div>
@@ -458,6 +462,8 @@ export function TasksPage({ tasks, projects, openCreate, taskActions, savedViews
       <PageIntro eyebrow="Tasks" title="My tasks" description={`${visible.length} of ${tasks.length} tasks shown.`}>
         <button className="button button-primary" onClick={() => openCreate("task")}>New task</button>
       </PageIntro>
+
+      <NaturalLanguageQuickAdd projects={projects} onAddTask={taskActions.onCreate} />
 
       <div className="toolbar card-surface">
         <label className="search-field"><input type="search" value={filters.query} onChange={setFilter("query")} placeholder="Filter tasks…" aria-label="Filter tasks" /></label>
@@ -803,6 +809,26 @@ export function CalendarPage({ tasks, projects, onExportCalendar, openCreate, ta
 /* ------------------------------------------------------------------ */
 
 export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChange, onCompleteTask }) {
+  const [ambientSound, setAmbientSound] = useState("off");
+  const [soundVolume, setSoundVolume] = useState(0.4);
+
+  useEffect(() => {
+    return () => {
+      soundEngine.stop();
+    };
+  }, []);
+
+  function handleSoundSelect(type) {
+    setAmbientSound(type);
+    soundEngine.start(type);
+  }
+
+  function handleVolumeChange(e) {
+    const val = parseFloat(e.target.value);
+    setSoundVolume(val);
+    soundEngine.setVolume(val);
+  }
+
   const open = tasks.filter(task => task.status !== "done");
   const total = Math.max(1, timer.duration * 60);
   const remaining = Math.max(0, timer.remaining);
@@ -840,6 +866,29 @@ export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChang
             <button key={minutes} className={timer.duration === minutes ? "active" : ""} aria-pressed={timer.duration === minutes} onClick={() => onReset(minutes)}>{minutes} min</button>
           ))}
           <button className={`break-button ${timer.duration === 5 ? "active" : ""}`} aria-pressed={timer.duration === 5} onClick={() => onReset(5)}>5 min break</button>
+        </div>
+        <div className="focus-ambient-section">
+          <div className="ambient-header">
+            <span className="ambient-title">🎧 Ambient Focus Sound</span>
+            {ambientSound !== "off" && (
+              <label className="ambient-vol-label">
+                <span>Vol</span>
+                <input type="range" min="0" max="1" step="0.05" value={soundVolume} onChange={handleVolumeChange} aria-label="Ambient volume" />
+              </label>
+            )}
+          </div>
+          <div className="ambient-buttons">
+            {[["off", "Off"], ["rain", "🌧️ Rain"], ["brown", "☕ Deep Noise"], ["drone", "🧘 Zen Drone"]].map(([type, label]) => (
+              <button
+                key={type}
+                className={`ambient-btn ${ambientSound === type ? "active" : ""}`}
+                onClick={() => handleSoundSelect(type)}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="focus-controls">
           {timer.running
