@@ -1,4 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#188879"/>
-  <path d="M168 150v212m0-212 176 212m0-212v212" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="42"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="background" x1="72" y1="48" x2="452" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8875EC"/>
+      <stop offset=".52" stop-color="#6758CC"/>
+      <stop offset="1" stop-color="#258D82"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="139" y1="150" x2="382" y2="365" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/>
+      <stop offset=".55" stop-color="#F4F1FF"/>
+      <stop offset="1" stop-color="#BDF2DC"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(0 255 -255 0 256 38)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="92" y="106" width="328" height="323" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="9"/>
+      <feOffset dy="9"/>
+      <feComponentTransfer><feFuncA slope=".2" type="linear"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#background)"/>
+  <rect width="512" height="512" rx="116" fill="url(#glow)"/>
+  <path d="M129 355V178c0-25 32-35 47-15l160 201c15 19 47 10 47-15V157" stroke="#362B81" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".22" stroke-width="51" filter="url(#shadow)"/>
+  <path d="M129 355V178c0-25 32-35 47-15l160 201c15 19 47 10 47-15V157" stroke="url(#ribbon)" stroke-linecap="round" stroke-linejoin="round" stroke-width="43"/>
+  <circle cx="383" cy="132" r="22" fill="#C5F5DF"/>
+  <circle cx="383" cy="132" r="9" fill="#fff"/>
 </svg>

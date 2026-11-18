@@ -24,7 +24,7 @@ const features = [
 function Logo() {
   return (
     <a className="landing-logo" href="/" aria-label="NexaFlow home">
-      <span className="landing-logo-mark" aria-hidden="true"><i /><i /><i /></span>
+      <img className="landing-logo-mark" src="/icon.svg" alt="" />
       <span>Nexa<span>Flow</span></span>
     </a>
   );
@@ -39,7 +39,7 @@ function WorkspacePreview() {
       </div>
       <div className="preview-workspace">
         <aside className="preview-sidebar" aria-hidden="true">
-          <div className="preview-mini-brand"><span className="preview-brand-mark">✳</span> NexaFlow</div>
+          <div className="preview-mini-brand"><img className="preview-brand-mark" src="/icon.svg" alt="" /> NexaFlow</div>
           <div className="preview-nav active"><span>◫</span> Overview</div>
           <div className="preview-nav"><span>✓</span> My tasks</div>
           <div className="preview-nav"><span>▦</span> Projects</div>
