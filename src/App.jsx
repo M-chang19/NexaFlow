@@ -205,6 +205,8 @@ export default function App() {
   const firedReminderKeys = useRef(new Set());
   const syncWarningShown = useRef(false);
   const reminderHistoryWarningShown = useRef(false);
+  const gSequenceTimer = useRef(null);
+  const inGSequence = useRef(false);
   const stateRef = useRef(state);
   const syncSettingsRef = useRef(syncSettings);
   const syncSessionRef = useRef(syncSession);
@@ -518,6 +520,37 @@ export default function App() {
       if (document.querySelector("dialog[open]")) return;
       const key = event.key.toLowerCase();
       const commandKey = event.ctrlKey || event.metaKey;
+      if (inGSequence.current) {
+        inGSequence.current = false;
+        clearTimeout(gSequenceTimer.current);
+        const navMap = {
+          t: "tasks",
+          b: "board",
+          c: "calendar",
+          f: "focus",
+          o: "overview",
+          p: "projects",
+          n: "notes",
+          g: "goals",
+          s: "settings",
+          m: "templates",
+          d: "dayPlan",
+          w: "weeklyReview"
+        };
+        if (navMap[key]) {
+          event.preventDefault();
+          navigate(navMap[key]);
+          return;
+        }
+      }
+      if (key === "g" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select, [role='textbox']"))) return;
+        inGSequence.current = true;
+        clearTimeout(gSequenceTimer.current);
+        gSequenceTimer.current = setTimeout(() => { inGSequence.current = false; }, 1200);
+        return;
+      }
       if (commandKey && key === "k") {
         event.preventDefault();
         setCommandPaletteOpen(open => !open);
@@ -569,6 +602,7 @@ export default function App() {
       setTimer(current => ({ ...current, remaining, running: remaining > 0 }));
       if (remaining === 0) {
         playFocusCompletionSound();
+        triggerConfetti();
         notify("Focus session complete. Take a short break.");
         update(current => ({ ...current, activity: logActivity(current, `Completed a ${timer.duration}-minute focus session${timer.taskId ? ` on ${current.tasks.find(task => task.id === timer.taskId)?.title || "a task"}` : ""}`, current.tasks.find(task => task.id === timer.taskId)?.projectId || "") }));
       }
@@ -673,6 +707,17 @@ export default function App() {
   }
 
   const taskActions = useMemo(() => ({
+    onCreate: taskData => create({
+      type: "task",
+      subtasks: [],
+      tags: [],
+      dependencyIds: [],
+      relatedNoteIds: [],
+      relatedTaskIds: [],
+      status: "todo",
+      priority: "medium",
+      ...taskData
+    }),
     onToggle: id => changeTaskStatus(id),
     onStatus: (id, status) => changeTaskStatus(id, status),
     onReschedule: (id, newDueDate) => update(current => {

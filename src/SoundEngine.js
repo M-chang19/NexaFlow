@@ -20,7 +20,9 @@ class AmbientSoundEngine {
       this.masterGain.connect(this.ctx.destination);
     }
     if (this.ctx.state === "suspended") {
-      this.ctx.resume();
+      try {
+        this.ctx.resume().catch(() => {});
+      } catch {}
     }
     return this.ctx;
   }
@@ -68,6 +70,9 @@ class AmbientSoundEngine {
     if (!ctx) return;
 
     this.stop();
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(this.volume, ctx.currentTime);
+    }
     this.currentType = type;
 
     if (type === "drone") {
@@ -140,8 +145,18 @@ class AmbientSoundEngine {
 
   stop() {
     if (this.currentSource) {
-      this.currentSource.stop();
+      if (this.masterGain && this.ctx) {
+        try {
+          this.masterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+        } catch {}
+      }
+      const src = this.currentSource;
       this.currentSource = null;
+      setTimeout(() => {
+        try {
+          src.stop();
+        } catch {}
+      }, 60);
     }
     this.currentType = "off";
   }

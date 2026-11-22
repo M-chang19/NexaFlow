@@ -7,6 +7,7 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
   const [text, setText] = useState("");
   const [showTips, setShowTips] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState("");
   const recognitionRef = useRef(null);
 
   const parsed = useMemo(() => {
@@ -20,7 +21,8 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
   function toggleVoice() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Speech recognition is not supported in this browser. Try Chrome or Edge!");
+      setVoiceNotice("Voice dictation is supported in Chrome, Edge, and Safari.");
+      setTimeout(() => setVoiceNotice(""), 4000);
       return;
     }
 
@@ -29,6 +31,7 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
         recognitionRef.current.stop();
       }
       setIsListening(false);
+      setVoiceNotice("");
       return;
     }
 
@@ -40,6 +43,7 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
 
       recognition.onstart = () => {
         setIsListening(true);
+        setVoiceNotice("Listening... speak your task");
       };
 
       recognition.onresult = event => {
@@ -48,14 +52,17 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
           setText(prev => (prev ? `${prev} ${transcript}` : transcript));
         }
         setIsListening(false);
+        setVoiceNotice("");
       };
 
       recognition.onerror = () => {
         setIsListening(false);
+        setVoiceNotice("");
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        setVoiceNotice("");
       };
 
       recognitionRef.current = recognition;
@@ -118,6 +125,13 @@ export function NaturalLanguageQuickAdd({ projects = [], onAddTask }) {
             Add Task
           </button>
         </div>
+
+        {voiceNotice && (
+          <div className="voice-notice-bar" role="status" aria-live="polite">
+            <span className="voice-notice-dot" />
+            <span>{voiceNotice}</span>
+          </div>
+        )}
 
         {hasContent && (
           <div className="quick-add-preview-ribbon">

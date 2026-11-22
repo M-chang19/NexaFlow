@@ -6952,3 +6952,64 @@ select:focus-visible {
   background: #1f2937;
   color: #94a3b8;
 }
+
+
+/* ==========================================================================
+   BOARD DRAGGING & FILTER ENHANCEMENTS
+   ========================================================================== */
+
+.kanban-task.dragging {
+  opacity: 0.42 !important;
+  transform: scale(0.97) rotate(1.5deg) !important;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.22) !important;
+  cursor: grabbing !important;
+}
+
+.board-top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.board-filter-group {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 10px;
+}
+
+.voice-notice-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  padding: 5px 12px;
+  border-radius: 8px;
+  margin-top: 8px;
+  animation: paletteFadeIn 0.15s ease-out;
+}
+
+.voice-notice-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulseVoice 1.2s infinite ease-in-out;
+}
+
+.theme-dark .board-filter-group {
+  background: #1f2937;
+}
+
+.theme-dark .voice-notice-bar {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+}

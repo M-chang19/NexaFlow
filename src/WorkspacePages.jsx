@@ -319,6 +319,10 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
   const nextSteps = [...open].sort(byUrgency).slice(0, 5);
   const doneCount = state.tasks.length - open.length;
   const percent = state.tasks.length ? Math.round((doneCount / state.tasks.length) * 100) : 0;
+  const totalEstimatedMinutes = open.reduce((acc, t) => acc + (Number(t.estimatedMinutes) || 0), 0);
+  const workloadText = totalEstimatedMinutes >= 60
+    ? `${Math.floor(totalEstimatedMinutes / 60)}h ${totalEstimatedMinutes % 60}m`
+    : `${totalEstimatedMinutes}m`;
   const highPriority = open.filter(task => task.priority === "high").slice(0, 3);
   const suggestion = nextSteps[0];
   const hour = new Date().getHours();
@@ -370,7 +374,7 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
     stats: (
       <section className="stats-card card-surface">
         <SectionHeading title="Workspace summary" />
-        {[["▤", "Open tasks", open.length], ["◷", "Overdue", overdue.length], ["▧", "Projects", state.projects.length], ["✦", "Notes", state.notes.length]].map(([icon, label, value]) => (
+        {[["▤", "Open tasks", open.length], ["◷", "Overdue", overdue.length], ["⏱", "Est. workload", workloadText], ["▧", "Projects", state.projects.length], ["✦", "Notes", state.notes.length]].map(([icon, label, value]) => (
           <div className="stat-row" key={label}><span className="stat-icon" aria-hidden="true">{icon}</span><span>{label}</span><strong>{value}</strong></div>
         ))}
       </section>
@@ -468,7 +472,7 @@ export function TasksPage({ tasks, projects, openCreate, taskActions, savedViews
         <button className="button button-primary" onClick={() => openCreate("task")}>New task</button>
       </PageIntro>
 
-      <NaturalLanguageQuickAdd projects={projects} onAddTask={taskActions.onCreate} />
+      <NaturalLanguageQuickAdd projects={projects} onAddTask={taskActions.onCreate || (taskData => openCreate("task", "", taskData))} />
 
       <div className="toolbar card-surface">
         <label className="search-field"><input type="search" value={filters.query} onChange={setFilter("query")} placeholder="Filter tasks…" aria-label="Filter tasks" /></label>
@@ -550,14 +554,36 @@ export function TasksPage({ tasks, projects, openCreate, taskActions, savedViews
 
 export function BoardPage({ tasks, projects, taskActions, openCreate }) {
   const [overColumn, setOverColumn] = useState("");
+  const [draggingTaskId, setDraggingTaskId] = useState(null);
+  const [priorityFilter, setPriorityFilter] = useState("all");
+
+  const filteredTasks = useMemo(() => {
+    if (priorityFilter === "all") return tasks;
+    return tasks.filter(t => t.priority === priorityFilter);
+  }, [tasks, priorityFilter]);
+
   return (
     <>
       <PageIntro eyebrow="Board" title="Kanban board" description="Drag cards between columns, or use the arrows.">
-        <button className="button button-primary" onClick={() => openCreate("task")}>New task</button>
+        <div className="board-top-actions">
+          <div className="board-filter-group" role="group" aria-label="Filter board by priority">
+            {[["all", "All"], ["high", "⚡ High"], ["medium", "Medium"], ["low", "Low"]].map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                className={`filter-tab ${priorityFilter === val ? "active" : ""}`}
+                onClick={() => setPriorityFilter(val)}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+          <button className="button button-primary" onClick={() => openCreate("task")}>New task</button>
+        </div>
       </PageIntro>
       <div className="kanban-board">
         {STATUSES.map(([status, label], columnIndex) => {
-          const column = tasks.filter(task => task.status === status).sort(byUrgency);
+          const column = filteredTasks.filter(task => task.status === status).sort(byUrgency);
           return (
             <section
               key={status}
@@ -595,7 +621,16 @@ export function BoardPage({ tasks, projects, taskActions, openCreate }) {
                   const project = projectName(projects, task.projectId);
                   const level = PRIORITY_RANK[task.priority] === undefined ? "medium" : task.priority;
                   return (
-                    <article key={task.id} className={`kanban-task priority-edge-${level}`} draggable onDragStart={event => event.dataTransfer.setData("text/plain", task.id)}>
+                    <article
+                      key={task.id}
+                      className={`kanban-task priority-edge-${level} ${draggingTaskId === task.id ? "dragging" : ""}`}
+                      draggable
+                      onDragStart={event => {
+                        event.dataTransfer.setData("text/plain", task.id);
+                        setDraggingTaskId(task.id);
+                      }}
+                      onDragEnd={() => setDraggingTaskId(null)}
+                    >
                       <div className="kanban-task-top">
                         <PriorityBadge priority={task.priority} />
                         {task.dueDate && <small className={isOverdue(task) ? "task-waiting-note" : ""}>{formatDate(task.dueDate)}</small>}
@@ -1516,12 +1551,13 @@ export function FirstRunDialog({ onStartSample, onStartBlank }) {
 
 export function ShortcutsDialog({ onClose, onCreate }) {
   const shortcuts = [
-    ["Ctrl/Cmd + K", "Search everything"],
-    ["Alt + Shift + T", "New task"],
-    ["Alt + Shift + P", "New project"],
-    ["Alt + Shift + N", "New note"],
-    ["G, then a letter", "Jump to a tab (G then T for Tasks)"],
-    ["?", "Show this list"]
+    ["Ctrl/Cmd + K", "Open Command Palette (search, jump, actions)"],
+    ["G then T / B / C / F / O / P / N", "Quick jump to Tab (Tasks, Board, Calendar, Focus, Overview...)"],
+    ["Alt + Shift + T", "New task dialog"],
+    ["Alt + Shift + P", "New project dialog"],
+    ["Alt + Shift + N", "New note dialog"],
+    ["Esc", "Close active modal or palette"],
+    ["?", "Show this shortcuts cheatsheet"]
   ];
   return (
     <Modal label="Keyboard shortcuts" onClose={onClose}>
