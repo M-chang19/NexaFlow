@@ -2,7 +2,7 @@
   "name": "NexaFlow Workspace",
   "short_name": "NexaFlow",
   "description": "A calm workspace for projects, tasks, notes, and focused work.",
-  "start_url": "/",
+  "start_url": "/workspace",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f5f6f1",

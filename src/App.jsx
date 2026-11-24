@@ -1,6 +1,37 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import SyncSettings from "./SyncSettings.jsx";
+import "./styles.css";
+import "./redesign.css";
+import {
+  ActivityPage,
+  AssistantPage,
+  BoardPage,
+  CalendarPage,
+  ConnectionStatus,
+  CreateDialog,
+  FirstRunDialog,
+  FocusPage,
+  makeId,
+  nextRecurringTask,
+  NotesPage,
+  Overview,
+  ProjectsPage,
+  ProjectDetailPage,
+  SearchResults,
+  SettingsPage,
+  ShortcutsDialog,
+  splitTags,
+  TasksPage,
+  todayKey,
+  WorkspaceErrorBoundary
+} from "./WorkspacePages.jsx";
+import { CommandPalette } from "./CommandPalette.jsx";
+import { triggerConfetti } from "./Gamification.jsx";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createCalendarFile } from "./calendarExport.js";
+const GoalsPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.GoalsPage })));
+const TemplatesPage = lazy(() => import("./ProductivityPages.jsx").then(module => ({ default: module.TemplatesPage })));
+const PlanMyDay = lazy(() => import("./PlanningPages.jsx").then(module => ({ default: module.PlanMyDay })));
+const QuickCaptureInbox = lazy(() => import("./PlanningPages.jsx").then(module => ({ default: module.QuickCaptureInbox })));
+const WeeklyReview = lazy(() => import("./PlanningPages.jsx").then(module => ({ default: module.WeeklyReview })));
 import {
   authenticateSupabase,
   readSupabaseSession,
@@ -13,7 +44,7 @@ import {
   writeSupabaseWorkspace
 } from "./sync.js";
 
-const EMPTY_STATE = { projects: [], tasks: [], notes: [], messages: [], activity: [] };
+const EMPTY_STATE = { projects: [], tasks: [], notes: [], messages: [], activity: [], goals: [], templates: [] };
 const OVERVIEW_PANELS = [
   { id: "hero", label: "Welcome banner" },
   { id: "tasks", label: "Next steps" },
@@ -41,9 +72,23 @@ const VIEW_TITLES = {
   projects: "Projects",
   assistant: "AI assistant",
   notes: "Notes",
-  settings: "Settings"
+  settings: "Settings",
+  goals: "Goals & milestones",
+  templates: "Templates",
+  dayPlan: "Plan my day",
+  inbox: "Quick-capture inbox",
+  weeklyReview: "Weekly review"
 };
-const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+function readSavedTaskViews() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("nexaflow-saved-task-views") || "[]");
+    return Array.isArray(saved) ? saved.filter(view => view && typeof view.id === "string" && typeof view.name === "string" && view.filters && typeof view.filters === "object") : [];
+  } catch (error) {
+    console.error("Could not read saved task views:", error);
+    return [];
+  }
+}
 function readOverviewPreferences() {
   try {
     const saved = JSON.parse(localStorage.getItem("nexaflow-overview-preferences") || "null");
@@ -60,40 +105,39 @@ function readOverviewPreferences() {
     return DEFAULT_OVERVIEW_PREFERENCES;
   }
 }
-const todayKey = (date = new Date()) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-};
-const splitTags = value => [...new Set(value.split(",").map(tag => tag.trim()).filter(Boolean))].slice(0, 12);
+
+
 
 function logActivity(state, label, projectId = "") {
   return [{ id: makeId(), label, projectId, createdAt: new Date().toISOString() }, ...(state.activity || [])].slice(0, 100);
 }
 
-function nextRecurringTask(task) {
-  if (!task.recurrence || !task.dueDate) return null;
-  const [year, month, day] = task.dueDate.split("-").map(Number);
-  const next = new Date(year, month - 1, day);
-  if (task.recurrence === "daily") next.setDate(next.getDate() + 1);
-  else if (task.recurrence === "weekly") next.setDate(next.getDate() + 7);
-  else if (task.recurrence === "monthly") {
-    next.setDate(1);
-    next.setMonth(next.getMonth() + 1);
-    next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+function playFocusCompletionSound() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const playNote = (freq, start, duration) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration);
+    };
+    playNote(523.25, 0, 0.6); // C5
+    playNote(659.25, 0.22, 0.6); // E5
+    playNote(783.99, 0.44, 0.9); // G5
+  } catch {
+    // AudioContext blocked or unsupported
   }
-  else return null;
-  const dueDate = todayKey(next);
-  const reminderTime = task.reminderAt?.match(/T(\d{2}:\d{2})/);
-  return {
-    ...task,
-    id: makeId(),
-    status: "todo",
-    dueDate,
-    reminderAt: reminderTime ? `${dueDate}T${reminderTime[1]}` : "",
-    subtasks: (task.subtasks || []).map(subtask => ({ ...subtask, id: makeId(), done: false })),
-    createdAt: new Date().toISOString()
-  };
 }
+
+
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -105,684 +149,23 @@ async function api(path, options = {}) {
   return result;
 }
 
-function Eyebrow({ children, line = false }) {
-  return <p className="eyebrow">{line && <span className="eyebrow-line" />}{children}</p>;
-}
 
-function EmptyState({ icon = "✦", title, description, action }) {
-  return (
-    <div className="empty-state">
-      <span className="empty-icon">{icon}</span>
-      <strong>{title}</strong>
-      <p>{description}</p>
-      {action}
-    </div>
-  );
-}
-
-function TaskRow({ task, projects, onToggle, onStatus, onDelete, onToggleSubtask, onEdit }) {
-  const project = projects.find(item => item.id === task.projectId);
-  const dueState = task.dueDate && task.status !== "done" ? (task.dueDate < todayKey() ? "overdue" : task.dueDate === todayKey() ? "due-today" : "") : "";
-  return (
-    <div className={`task-row-wrap ${dueState}`}>
-    <div className="task-row">
-      <button className={`task-check ${task.status === "done" ? "checked" : ""}`} onClick={() => onToggle(task.id)} aria-label={`${task.status === "done" ? "Reopen" : "Complete"} ${task.title}`}>
-        {task.status === "done" ? "✓" : ""}
-      </button>
-      <div className="task-copy">
-        <strong className={task.status === "done" ? "task-done" : ""}>{task.title}</strong>
-        <small>{project && <><span className="task-project-dot" />{project.name} · </>}{task.details || (task.status === "done" ? "Completed" : "No extra details")}{task.dueDate && <> · <span className={`task-due ${dueState}`}>{dueState === "overdue" ? "Overdue" : dueState === "due-today" ? "Due today" : `Due ${task.dueDate}`}</span></>}</small>
-        {(task.priority || task.tags?.length > 0) && <div className="task-badges">{task.priority && <span className={`priority-badge priority-${task.priority}`}>{task.priority} priority</span>}{(task.tags || []).map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
-      </div>
-      <select className={`task-status status-${task.status}`} value={task.status} onChange={event => onStatus(task.id, event.target.value)} aria-label={`Status for ${task.title}`}>
-        <option value="todo">To do</option>
-        <option value="in-progress">In progress</option>
-        <option value="done">Done</option>
-      </select>
-      <button className="row-edit" onClick={() => onEdit(task)} aria-label={`Edit ${task.title}`} title="Edit task">✎</button>
-      <button className="row-delete" onClick={() => onDelete(task.id)} aria-label={`Delete ${task.title}`} title="Delete task">×</button>
-    </div>
-    {task.subtasks?.length > 0 && <div className="subtask-list">{task.subtasks.map(subtask => <label className="subtask-row" key={subtask.id}><input type="checkbox" checked={subtask.done} onChange={() => onToggleSubtask(task.id, subtask.id)} /><span className={subtask.done ? "subtask-done" : ""}>{subtask.title}</span></label>)}</div>}
-    </div>
-  );
-}
-
-function PageIntro({ eyebrow, title, description, action, badge }) {
-  return (
-    <div className={`page-intro ${badge ? "assistant-intro" : ""}`}>
-      <div><Eyebrow line>{eyebrow}</Eyebrow><h1>{title}</h1><p>{description}</p></div>
-      {action}
-      {badge}
-    </div>
-  );
-}
-
-function FirstRunDialog({ onStartSample, onStartBlank }) {
-  const dialogRef = useRef(null);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return undefined;
-    dialog.showModal();
-    return () => { if (dialog.open) dialog.close(); };
-  }, []);
-  return (
-    <dialog className="welcome-dialog" ref={dialogRef} onCancel={event => { event.preventDefault(); onStartBlank(); }}>
-      <div className="welcome-dialog-content">
-        <span className="welcome-dialog-mark" aria-hidden="true">✳</span>
-        <Eyebrow line>WELCOME TO NEXAFLOW</Eyebrow>
-        <h2>A little space to get started.</h2>
-        <p>Keep projects, next steps, and notes together. Start with a small example workspace, or jump straight into your own.</p>
-        <div className="welcome-guide">
-          <div><span>01</span><p><strong>Capture a next step</strong><small>Give a task a name and a clear place to start.</small></p></div>
-          <div><span>02</span><p><strong>Give related work a home</strong><small>Group tasks and notes inside a project.</small></p></div>
-          <div><span>03</span><p><strong>Make it your own</strong><small>Everything stays on this device; AI is optional.</small></p></div>
-        </div>
-        <div className="welcome-dialog-actions">
-          <button className="button button-secondary" onClick={onStartBlank}>Start with a blank workspace</button>
-          <button className="button button-primary" onClick={onStartSample}>Try a sample workspace</button>
-        </div>
-        <p className="welcome-dialog-footnote">You can remove sample items anytime from Settings.</p>
-      </div>
-    </dialog>
-  );
-}
-
-function ShortcutsDialog({ onClose, onCreate }) {
-  const dialogRef = useRef(null);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return undefined;
-    dialog.showModal();
-    return () => { if (dialog.open) dialog.close(); };
-  }, []);
-  return (
-    <dialog className="welcome-dialog shortcuts-dialog" ref={dialogRef} onCancel={event => { event.preventDefault(); onClose(); }} onClose={onClose}>
-      <div className="welcome-dialog-content">
-        <Eyebrow line>QUICKER WAYS TO WORK</Eyebrow>
-        <h2>Keyboard shortcuts</h2>
-        <p>Use these shortcuts from anywhere in your workspace.</p>
-        <div className="shortcut-list">
-          <div><span>Search everything</span><kbd>Ctrl</kbd><b>+</b><kbd>K</kbd><small>or ⌘ K on Mac</small></div>
-          <div><span>New task</span><kbd>Alt</kbd><b>+</b><kbd>Shift</kbd><b>+</b><kbd>T</kbd></div>
-          <div><span>New project</span><kbd>Alt</kbd><b>+</b><kbd>Shift</kbd><b>+</b><kbd>P</kbd></div>
-          <div><span>New note</span><kbd>Alt</kbd><b>+</b><kbd>Shift</kbd><b>+</b><kbd>N</kbd></div>
-          <div><span>Show shortcuts</span><kbd>?</kbd></div>
-        </div>
-        <div className="welcome-dialog-actions">
-          <button className="button button-secondary" onClick={onClose}>Close</button>
-          <button className="button button-primary" onClick={() => { onClose(); onCreate("task"); }}>＋ New task</button>
-        </div>
-      </div>
-    </dialog>
-  );
-}
-
-function CreateDialog({ item, projects, onClose, onCreate }) {
-  const dialogRef = useRef(null);
-  const nameRef = useRef(null);
-  const configs = {
-    task: {
-      title: item?.record ? "Edit this task" : "Add a next step", eyebrow: "SMALL STEPS, REAL MOMENTUM",
-      description: "A clear next step makes a big goal feel a little closer.",
-      name: "Task name", details: "Any helpful details", namePlaceholder: "What needs doing?",
-      detailsPlaceholder: "Add context, a deadline, or a small first step…", button: item?.record ? "Save task" : "Add task"
-    },
-    project: {
-      title: item?.record ? "Edit project" : "Give it a home", eyebrow: "MAKE SPACE FOR AN IDEA",
-      description: "Create a space to bring related tasks and ideas together.",
-      name: "Project name", details: "What is this project about?", namePlaceholder: "A name that feels right",
-      detailsPlaceholder: "What are you hoping to make, learn, or change?", button: item?.record ? "Save project" : "Create project"
-    },
-    note: {
-      title: item?.record ? "Edit note" : "Save a thought", eyebrow: "KEEP WHAT MATTERS",
-      description: "A quick note can help you pick up where you left off.",
-      name: "Note title", details: "Your note", namePlaceholder: "Give this thought a title",
-      detailsPlaceholder: "Start writing…", button: item?.record ? "Save note" : "Save note"
-    }
-  };
-  const config = item ? configs[item.type] : null;
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!item || !dialog) return undefined;
-    dialog.showModal();
-    nameRef.current?.focus();
-    return () => { if (dialog.open) dialog.close(); };
-  }, [item]);
-
-  if (!item || !config) return null;
-
-  function submit(event) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    if (item.type === "task" && formData.get("recurrence") && !formData.get("dueDate")) {
-      window.alert("Add a due date before setting a task to repeat.");
-      return;
-    }
-    onCreate({
-      type: item.type,
-      id: item.record?.id,
-      folder: String(formData.get("folder") || "").trim(),
-      projectId: String(formData.get("projectId") || item.projectId || ""),
-      title: String(formData.get("title") || "").trim(),
-      details: String(formData.get("details") || "").trim(),
-      dueDate: String(formData.get("dueDate") || ""),
-      reminderAt: String(formData.get("reminderAt") || ""),
-      priority: String(formData.get("priority") || "medium"),
-      recurrence: String(formData.get("recurrence") || ""),
-      tags: splitTags(String(formData.get("tags") || "")),
-      subtasks: String(formData.get("subtasks") || "").split("\n").map(title => title.trim()).filter(Boolean).slice(0, 30),
-      status: String(formData.get("status") || item.record?.status || "todo")
-    });
-  }
-
-  return (
-    <dialog className="modal" ref={dialogRef} onCancel={onClose} onClose={onClose}>
-      <form method="dialog" className="modal-close-form"><button className="modal-close" aria-label="Close dialog">×</button></form>
-      <div className="modal-content">
-        <Eyebrow>{config.eyebrow}</Eyebrow>
-        <h2>{config.title}</h2>
-        <p className="modal-description">{config.description}</p>
-        <form className="create-form" onSubmit={submit}>
-          <label>{config.name}<input ref={nameRef} name="title" required maxLength={120} defaultValue={item.record?.title || ""} placeholder={config.namePlaceholder} autoComplete="off" /></label>
-          {item.type === "task" && projects.length > 0 && (
-            <label>Project (optional)
-              <select name="projectId" defaultValue={item.record?.projectId || item.projectId || ""}>
-                <option value="">No project</option>
-                {projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}
-              </select>
-            </label>
-          )}
-          {item.type === "task" && <>
-            <div className="form-grid">
-              <label>Due date<input name="dueDate" type="date" defaultValue={item.record?.dueDate || ""} /></label>
-              <label>Priority<select name="priority" defaultValue={item.record?.priority || "medium"}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-            </div>
-            <label>Repeat<select name="recurrence" defaultValue={item.record?.recurrence || ""}><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
-            <label>Reminder (optional)<input name="reminderAt" type="datetime-local" defaultValue={item.record?.reminderAt ? item.record.reminderAt.slice(0, 16) : ""} /></label>
-            <label>Tags (comma-separated)<input name="tags" maxLength={240} defaultValue={(item.record?.tags || []).join(", ")} placeholder="design, launch, follow-up" /></label>
-            {item.record && <label>Status<select name="status" defaultValue={item.record.status}><option value="todo">To do</option><option value="in-progress">In progress</option><option value="done">Done</option></select></label>}
-            <label>Subtasks (one per line)<textarea name="subtasks" rows="3" maxLength={1200} defaultValue={(item.record?.subtasks || []).map(subtask => subtask.title).join("\n")} placeholder={"Research options\nDraft the first version"} /></label>
-          </>}
-          {item.type === "project" && <>
-            <label>Folder (optional)<input name="folder" list="project-folders" maxLength={80} defaultValue={item.record?.folder || ""} placeholder="e.g. Work, Personal, Learning" /><datalist id="project-folders">{[...new Set(projects.map(project => project.folder?.trim()).filter(Boolean))].map(folder => <option value={folder} key={folder} />)}</datalist></label>
-            <label>Tags (comma-separated)<input name="tags" maxLength={240} defaultValue={(item.record?.tags || []).join(", ")} placeholder="work, personal, learning" /></label>
-          </>}
-          {item.type === "note" && projects.length > 0 && <label>Project (optional)<select name="projectId" defaultValue={item.record?.projectId || item.projectId || ""}><option value="">No project</option>{projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>}
-          <label>{config.details}<textarea name="details" rows="4" maxLength="1200" required={item.type === "note"} defaultValue={item.record?.details ?? item.record?.description ?? item.record?.body ?? ""} placeholder={config.detailsPlaceholder} /></label>
-          <div className="modal-actions">
-            <button type="button" className="button button-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="button button-primary">{config.button}</button>
-          </div>
-        </form>
-      </div>
-    </dialog>
-  );
-}
-
-function Overview({ state, openCreate, navigate, taskActions, preferences }) {
-  const todayDate = todayKey();
-  const openTasks = state.tasks.filter(task => task.status !== "done").sort((a, b) =>
-    (a.dueDate || "9999").localeCompare(b.dueDate || "9999") ||
-    ({ high: 0, medium: 1, low: 2 }[a.priority || "medium"] - { high: 0, medium: 1, low: 2 }[b.priority || "medium"]) ||
-    (b.createdAt || "").localeCompare(a.createdAt || "")
-  );
-  const overdueTasks = openTasks.filter(task => task.dueDate && task.dueDate < todayDate).length;
-  const dueTodayTasks = openTasks.filter(task => task.dueDate === todayDate).length;
-  const doneTasks = state.tasks.filter(task => task.status === "done");
-  const completion = state.tasks.length ? Math.round(doneTasks.length / state.tasks.length * 100) : 0;
-  const priorityCounts = ["high", "medium", "low"].map(priority => ({ priority, count: state.tasks.filter(task => task.priority === priority && task.status !== "done").length }));
-  const today = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date());
-  const visible = new Set(preferences.visible);
-  const orderedMainPanels = preferences.order.filter(id => ["hero", "tasks", "insights", "activity"].includes(id) && visible.has(id));
-  const orderedSidePanels = preferences.order.filter(id => ["stats", "focus"].includes(id) && visible.has(id));
-  const panels = {
-    hero: <section className="hero-card">
-      <div className="hero-content"><div className="hero-kicker"><span className="hero-kicker-dot" />YOUR NEXT CHAPTER</div><h2>Big ideas. Clear<br />next steps.</h2><p>Bring your projects, to-dos, and questions together. We’ll help you find your flow.</p><button className="button button-light" onClick={() => navigate("assistant")}>Start with a question <span>↗</span></button></div>
-      <div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="art-center"><span>✳</span></div><div className="art-orb orb-one">✦</div><div className="art-orb orb-two">•</div><div className="art-orb orb-three">✧</div></div><div className="hero-glow" />
-    </section>,
-    tasks: <section className="section-block">
-      <div className="section-heading"><div><Eyebrow>YOUR NEXT STEPS</Eyebrow><h2>Tasks to move forward <span className="heading-count">{openTasks.length}</span></h2></div><button className="link-button" onClick={() => navigate("tasks")}>All tasks <span>→</span></button></div>
-      <div className="task-list card-surface">
-        {openTasks.length ? openTasks.slice(0, 5).map(task => <TaskRow key={task.id} task={task} {...taskActions} projects={state.projects} />) : <EmptyState title={state.tasks.length ? "Everything is wrapped up." : "Your next step starts here."} description={state.tasks.length ? "Take a breath, or capture your next idea." : "Add a task to give your ideas a little momentum."} action={!state.tasks.length && <button className="link-button" onClick={() => openCreate("task")}>Create your first task <span>→</span></button>} />}
-      </div>
-    </section>,
-    insights: <section className="section-block">
-      <div className="section-heading"><div><Eyebrow>WORKSPACE PULSE</Eyebrow><h2>Progress at a glance</h2></div><button className="link-button" onClick={() => navigate("activity")}>Activity history <span>→</span></button></div>
-      <div className="insights-card card-surface">
-        <div className="insight-completion"><strong>{completion}%</strong><span>of all tasks complete</span><div className="progress-track"><div style={{ width: `${completion}%` }} /></div></div>
-        <div className="priority-chart" aria-label="Open tasks grouped by priority">{priorityCounts.map(item => <div className="priority-chart-row" key={item.priority}><span>{item.priority}</span><div className="progress-track"><div className={`priority-fill priority-fill-${item.priority}`} style={{ width: `${openTasks.length ? item.count / openTasks.length * 100 : 0}%` }} /></div><strong>{item.count}</strong></div>)}</div>
-      </div>
-    </section>,
-    activity: <ActivityPanel items={(state.activity || []).slice(0, 5)} />,
-    stats: <section className="stats-card card-surface"><div className="card-title-row"><div><Eyebrow>A QUICK LOOK</Eyebrow><h2>Your rhythm</h2></div><span className="stat-spark">✳</span></div>
-      <div className="stat-row"><span className="stat-icon stat-violet">▤</span><span className="stat-label">Open tasks</span><strong>{openTasks.length}</strong></div>
-      <div className="stat-row"><span className="stat-icon stat-peach">!</span><span className="stat-label">Overdue</span><strong>{overdueTasks}</strong></div>
-      <div className="stat-row"><span className="stat-icon stat-mint">◷</span><span className="stat-label">Due today</span><strong>{dueTodayTasks}</strong></div>
-      <div className="stat-row"><span className="stat-icon stat-mint">▧</span><span className="stat-label">Projects</span><strong>{state.projects.length}</strong></div>
-      <div className="stat-row"><span className="stat-icon stat-violet">✓</span><span className="stat-label">Completed</span><strong>{doneTasks.length}</strong></div>
-      <div className="progress-caption"><span>This week</span><span>{completion}% complete</span></div><div className="progress-track"><div style={{ width: `${completion}%` }} /></div>
-    </section>,
-    focus: <section className="focus-card"><div className="focus-icon">✳</div><Eyebrow>A MOMENT TO RESET</Eyebrow><h3>Not sure where to start?</h3><p>Tell your AI assistant what’s on your mind. You don’t need to have it all figured out.</p><button className="link-button" onClick={() => navigate("assistant")}>Let’s untangle it <span>→</span></button></section>
-  };
-  return (
-    <section className="view active">
-      <div className="welcome-row">
-        <div><Eyebrow line>YOUR SPACE, YOUR PACE</Eyebrow><h1>Make room for <span className="headline-accent">good work.</span></h1><p className="welcome-copy">A little clarity goes a long way. What would you like to move forward today?</p></div>
-        <div className="date-pill"><span className="date-icon">✳</span><span><small>TODAY</small>{today}</span></div>
-      </div>
-      <div className="overview-quick-actions" aria-label="Quick create">
-        <button className="overview-create-action" onClick={() => openCreate("task")}><span className="quick-action-icon quick-task">＋</span><span><strong>New task</strong><small>Capture a next step</small></span><span className="quick-arrow">↗</span></button>
-        <button className="overview-create-action" onClick={() => openCreate("project")}><span className="quick-action-icon quick-project">▧</span><span><strong>New project</strong><small>Give an idea a home</small></span><span className="quick-arrow">↗</span></button>
-        <button className="overview-create-action" onClick={() => openCreate("note")}><span className="quick-action-icon quick-note">✎</span><span><strong>New note</strong><small>Save a thought</small></span><span className="quick-arrow">↗</span></button>
-      </div>
-      <div className="overview-grid">
-        <div className="overview-main">{orderedMainPanels.map(id => <div className={`overview-panel overview-panel-${id}`} key={id}>{panels[id]}</div>)}</div>
-        <div className="overview-side">{orderedSidePanels.map(id => <div className={`overview-panel overview-panel-${id}`} key={id}>{panels[id]}</div>)}</div>
-      </div>
-    </section>
-  );
-}
-
-function TasksPage({ tasks, projects, openCreate, taskActions }) {
-  const [filter, setFilter] = useState("all");
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("due");
-  const [projectFilter, setProjectFilter] = useState("all");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const filtered = tasks.filter(task => (filter === "all" || task.status === filter) &&
-    (projectFilter === "all" || (projectFilter === "__unassigned__" ? !task.projectId : task.projectId === projectFilter)) &&
-    (priorityFilter === "all" || (task.priority || "medium") === priorityFilter) &&
-    `${task.title} ${task.details || ""} ${(task.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => {
-    if (sort === "priority") return ({ high: 0, medium: 1, low: 2 }[a.priority || "medium"] - { high: 0, medium: 1, low: 2 }[b.priority || "medium"]) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
-    if (sort === "title") return a.title.localeCompare(b.title);
-    if (sort === "created") return (b.createdAt || "").localeCompare(a.createdAt || "");
-    return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
-  });
-  const hasFilters = query || filter !== "all" || projectFilter !== "all" || priorityFilter !== "all";
-  return (
-    <section className="view active">
-      <PageIntro eyebrow="ONE THING AT A TIME" title="Your tasks" description="Keep the next steps small, clear, and moving." action={<button className="button button-primary" onClick={() => openCreate("task")}><span>＋</span> Add a task</button>} />
-      <div className="toolbar card-surface"><div className="filter-tabs" role="group" aria-label="Filter tasks">
-        {[["all", `All ${tasks.length}`], ["todo", "To do"], ["in-progress", "In progress"], ["done", "Done"]].map(([value, label]) => <button key={value} className={`filter-tab ${filter === value ? "active" : ""}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
-      </div></div><div className="toolbar-extra">
-        <label className="search-field"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a task…" aria-label="Search tasks" /></label>
-        <label className="sort-field">Project<select value={projectFilter} onChange={event => setProjectFilter(event.target.value)} aria-label="Filter tasks by project"><option value="all">All projects</option><option value="__unassigned__">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
-        <label className="sort-field">Priority<select value={priorityFilter} onChange={event => setPriorityFilter(event.target.value)} aria-label="Filter tasks by priority"><option value="all">All priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
-        <label className="sort-field">Sort<select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort tasks"><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Title</option><option value="created">Recently added</option></select></label>
-        <span className="result-count" aria-live="polite">{filtered.length} {filtered.length === 1 ? "task" : "tasks"}</span>
-        {hasFilters && <button className="clear-filters" onClick={() => { setQuery(""); setFilter("all"); setProjectFilter("all"); setPriorityFilter("all"); }}>Clear filters</button>}
-      </div>
-      <div className="task-list tasks-page-list card-surface">{filtered.length ? filtered.map(task => <TaskRow key={task.id} task={task} projects={projects} {...taskActions} />) : <EmptyState title={tasks.length ? "No tasks match that view." : "A fresh page, full of possibility."} description={tasks.length ? "Try another filter or search." : "Create a task to capture your next step."} action={!tasks.length && <button className="button button-secondary" onClick={() => openCreate("task")}>＋ Add a task</button>} />}</div>
-    </section>
-  );
-}
-
-function BoardPage({ tasks, projects, taskActions }) {
-  const [query, setQuery] = useState("");
-  const [projectFilter, setProjectFilter] = useState("all");
-  const columns = [["todo", "To do"], ["in-progress", "In progress"], ["done", "Done"]];
-  const visibleTasks = tasks.filter(task => (projectFilter === "all" || (projectFilter === "__unassigned__" ? !task.projectId : task.projectId === projectFilter)) &&
-    `${task.title} ${task.details || ""} ${(task.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
-  function dragStart(event, taskId) {
-    event.dataTransfer.setData("text/plain", taskId);
-    event.dataTransfer.effectAllowed = "move";
-  }
-  return <section className="view active">
-    <PageIntro eyebrow="SEE THE WHOLE FLOW" title="Kanban board" description="Move work across the board as it progresses." />
-    <div className="board-toolbar toolbar-extra">
-      <label className="search-field"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a task…" aria-label="Search board tasks" /></label>
-      <label className="sort-field">Project<select value={projectFilter} onChange={event => setProjectFilter(event.target.value)} aria-label="Filter board by project"><option value="all">All projects</option><option value="__unassigned__">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
-      <span className="result-count">{visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"}</span>
-      {(query || projectFilter !== "all") && <button className="clear-filters" onClick={() => { setQuery(""); setProjectFilter("all"); }}>Clear filters</button>}
-    </div>
-    <div className="kanban-board">{columns.map(([status, title]) => {
-      const columnTasks = visibleTasks.filter(task => task.status === status);
-      return <section className="kanban-column card-surface" key={status} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain"); if (id) taskActions.onStatus(id, status); }}>
-        <div className="kanban-column-heading"><h2>{title}</h2><span>{columnTasks.length}</span></div>
-        <div className="kanban-column-body">{columnTasks.map(task => {
-          const project = projects.find(item => item.id === task.projectId);
-          return <article className="kanban-task" key={task.id} draggable onDragStart={event => dragStart(event, task.id)}>
-            <div className="kanban-task-top"><span className={`priority-badge priority-${task.priority || "medium"}`}>{task.priority || "medium"}</span><button className="row-edit" onClick={() => taskActions.onEdit(task)} aria-label={`Edit ${task.title}`}>✎</button></div>
-            <strong>{task.title}</strong>{project && <small>{project.name}</small>}{task.dueDate && <small className={task.dueDate < todayKey() && status !== "done" ? "task-due overdue" : ""}>Due {task.dueDate}</small>}
-            <div className="kanban-task-actions"><button disabled={status === "todo"} onClick={() => taskActions.onStatus(task.id, status === "done" ? "in-progress" : "todo")}>←</button><button disabled={status === "done"} onClick={() => taskActions.onStatus(task.id, status === "todo" ? "in-progress" : "done")}>→</button></div>
-          </article>;
-        })}</div>
-      </section>;
-    })}</div>
-  </section>;
-}
-
-function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChange }) {
-  const minutes = Math.floor(timer.remaining / 60);
-  const seconds = timer.remaining % 60;
-  const selectedTask = tasks.find(task => task.id === timer.taskId);
-  return <section className="view active">
-    <PageIntro eyebrow="A LITTLE SPACE TO FOCUS" title="Focus timer" description="Choose one task, protect a work session, and take it one step at a time." />
-    <div className="focus-timer-card card-surface">
-      <div className={`timer-ring ${timer.running ? "timer-running" : ""}`} style={{ "--timer-progress": `${360 * (1 - timer.remaining / (timer.duration * 60))}deg` }}><div><strong>{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</strong><span>{timer.running ? "FOCUS SESSION" : "READY WHEN YOU ARE"}</span></div></div>
-      <h2>{selectedTask ? selectedTask.title : "Make a little room to focus"}</h2>
-      <label className="focus-task-select">Focus task<select value={timer.taskId} onChange={event => onTaskChange(event.target.value)} disabled={timer.running}><option value="">No specific task</option>{tasks.filter(task => task.status !== "done").map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select></label>
-      <div className="focus-duration"><button className={timer.duration === 25 ? "active" : ""} onClick={() => onReset(25)}>25 min</button><button className={timer.duration === 50 ? "active" : ""} onClick={() => onReset(50)}>50 min</button></div>
-      <div className="focus-controls"><button className="button button-primary" onClick={timer.running ? onPause : onStart}>{timer.running ? "Pause session" : "Start focusing"}</button><button className="button button-secondary" onClick={() => onReset(timer.duration)}>Reset</button></div>
-    </div>
-  </section>;
-}
-
-function SearchResults({ query, state, onChoose }) {
-  const term = query.trim().toLowerCase();
-  if (!term) return null;
-  const results = [
-    ...state.tasks.filter(item => `${item.title} ${item.details || ""} ${(item.tags || []).join(" ")}`.toLowerCase().includes(term)).map(item => ({ type: "task", id: item.id, title: item.title, subtitle: `Task · ${item.status}` })),
-    ...state.projects.filter(item => `${item.name} ${item.description || ""} ${item.folder || ""} ${(item.tags || []).join(" ")}`.toLowerCase().includes(term)).map(item => ({ type: "project", id: item.id, title: item.name, subtitle: item.folder ? `Project · ${item.folder}` : "Project" })),
-    ...state.notes.filter(item => `${item.title} ${item.body || ""}`.toLowerCase().includes(term)).map(item => ({ type: "note", id: item.id, title: item.title, subtitle: "Note" })),
-    ...state.messages.filter(item => item.content.toLowerCase().includes(term)).slice(-10).map(item => ({ type: "assistant", id: item.id, title: item.content.slice(0, 100), subtitle: `${item.role === "user" ? "You" : "Assistant"} · Conversation` }))
-  ].slice(0, 12);
-  return <div className="global-search-results">{results.length ? results.map(item => <button key={`${item.type}-${item.id}`} onClick={() => onChoose(item)}><strong>{item.title}</strong><small>{item.subtitle}</small></button>) : <p>No matching tasks, projects, notes, or messages.</p>}</div>;
-}
-
-function CalendarPage({ tasks, navigate, onExportCalendar }) {
-  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
-  const offset = (firstDay.getDay() + 6) % 7;
-  const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-  const cells = [...Array(offset).fill(null), ...Array.from({ length: days }, (_, index) => index + 1)];
-  while (cells.length % 7) cells.push(null);
-  const dateKey = day => `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  return <section className="view active">
-    <PageIntro eyebrow="MAKE TIME FOR WHAT MATTERS" title="Your calendar" description="See what’s coming up and make space for the next step." action={<><button className="button button-secondary" onClick={onExportCalendar}>Export calendar (.ics)</button><button className="button button-secondary" onClick={() => navigate("tasks")}>View task list</button></>} />
-    <div className="calendar-card card-surface">
-      <div className="calendar-heading"><button className="icon-button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month">←</button><h2>{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><button className="icon-button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month">→</button></div>
-      <div className="calendar-grid">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(day => <strong className="calendar-weekday" key={day}>{day}</strong>)}{cells.map((day, index) => {
-        const due = day ? tasks.filter(task => task.dueDate === dateKey(day)) : [];
-        return <div key={`${day || "blank"}-${index}`} className={`calendar-day ${day && dateKey(day) === todayKey() ? "calendar-today" : ""} ${day ? "" : "calendar-blank"}`}><span>{day || ""}</span>{due.slice(0, 3).map(task => <button key={task.id} className={`calendar-task ${task.status === "done" ? "calendar-task-done" : ""}`} onClick={() => navigate("tasks")} title={task.title}>{task.title}</button>)}{due.length > 3 && <small>+{due.length - 3} more</small>}</div>;
-      })}</div>
-      {!tasks.some(task => task.dueDate) && <p className="calendar-hint">Add due dates to tasks to see them here.</p>}
-    </div>
-  </section>;
-}
-
-function ActivityPanel({ items, emptyMessage = "Workspace changes will appear here." }) {
-  return <section className="section-block"><div className="section-heading"><div><Eyebrow>RECENT CHANGES</Eyebrow><h2>Activity history</h2></div></div><div className="activity-list card-surface">{items.length ? items.map(item => <div className="activity-row" key={item.id}><span className="activity-mark">✳</span><span>{item.label}</span><time>{new Date(item.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time></div>) : <p className="activity-empty">{emptyMessage}</p>}</div></section>;
-}
-
-function ActivityPage({ items }) {
-  const [query, setQuery] = useState("");
-  const visibleItems = items.filter(item => item.label.toLowerCase().includes(query.trim().toLowerCase()));
-  return <section className="view active"><PageIntro eyebrow="A RECORD OF YOUR MOMENTUM" title="Activity history" description="A recent timeline of what’s changed in your workspace." /><div className="toolbar-extra"><label className="search-field"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find an update…" aria-label="Search activity history" /></label><span className="result-count">{visibleItems.length} {visibleItems.length === 1 ? "update" : "updates"}</span></div><ActivityPanel items={visibleItems} emptyMessage={query ? "No updates match that search." : undefined} /></section>;
-}
-
-function ProjectsPage({ projects, tasks, openCreate, onDelete, onEdit, onOpen }) {
-  const [query, setQuery] = useState("");
-  const [folderFilter, setFolderFilter] = useState("all");
-  const [sort, setSort] = useState("updated");
-  const palettes = ["project-lilac", "project-mint", "project-peach", "project-blue"];
-  const symbols = ["✳", "▧", "✦", "◈"];
-  const folders = [...new Set(projects.map(project => project.folder?.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  const visibleProjects = projects.filter(project => (folderFilter === "all" || (folderFilter === "__unfiled__" ? !project.folder?.trim() : project.folder?.trim() === folderFilter)) &&
-    `${project.name} ${project.description || ""} ${project.folder || ""} ${(project.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => {
-    if (sort === "name") return a.name.localeCompare(b.name);
-    if (sort === "progress") {
-      const progressA = tasks.filter(task => task.projectId === a.id).filter(task => task.status === "done").length / Math.max(1, tasks.filter(task => task.projectId === a.id).length);
-      const progressB = tasks.filter(task => task.projectId === b.id).filter(task => task.status === "done").length / Math.max(1, tasks.filter(task => task.projectId === b.id).length);
-      return progressB - progressA || a.name.localeCompare(b.name);
-    }
-    return (b.createdAt || "").localeCompare(a.createdAt || "");
-  });
-  const hasFilters = query || folderFilter !== "all";
-  return (
-    <section className="view active">
-      <PageIntro eyebrow="IDEAS WITH A HOME" title="Your projects" description="Give the things you care about a little space to grow." action={<button className="button button-primary" onClick={() => openCreate("project")}><span>＋</span> New project</button>} />
-      <div className="toolbar-extra">
-        <label className="search-field"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a project…" aria-label="Search projects" /></label>
-        <label className="sort-field">Folder<select value={folderFilter} onChange={event => setFolderFilter(event.target.value)} aria-label="Filter projects by folder"><option value="all">All folders</option>{folders.map(folder => <option value={folder} key={folder}>{folder}</option>)}{projects.some(project => !project.folder?.trim()) && <option value="__unfiled__">Unfiled</option>}</select></label>
-        <label className="sort-field">Sort<select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort projects"><option value="updated">Recently added</option><option value="name">Name</option><option value="progress">Progress</option></select></label>
-        <span className="result-count">{visibleProjects.length} {visibleProjects.length === 1 ? "project" : "projects"}</span>
-        {hasFilters && <button className="clear-filters" onClick={() => { setQuery(""); setFolderFilter("all"); }}>Clear filters</button>}
-      </div>
-      <div className="project-grid">
-        {visibleProjects.length ? visibleProjects.map((project, index) => {
-          const projectTasks = tasks.filter(task => task.projectId === project.id);
-          const completed = projectTasks.filter(task => task.status === "done").length;
-          const progress = projectTasks.length ? Math.round(completed / projectTasks.length * 100) : 0;
-          return <article className={`project-card card-surface ${palettes[index % palettes.length]}`} key={project.id}>
-            <div className="project-card-top"><span className="project-symbol">{symbols[index % symbols.length]}</span><div><button className="row-edit" onClick={() => onEdit(project)} aria-label={`Edit ${project.name}`} title="Edit project">✎</button><button className="row-delete" onClick={() => onDelete(project.id)} aria-label={`Delete ${project.name}`} title="Delete project">×</button></div></div>
-            <Eyebrow>{project.folder?.trim() || `PROJECT ${String(index + 1).padStart(2, "0")}`}</Eyebrow><h2>{project.name}</h2><p className="project-description">{project.description || "A new space for your ideas and next steps."}</p>
-              {(project.tags || []).length > 0 && <div className="project-tags">{project.tags.map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
-            <div className="project-progress-caption"><span>{projectTasks.length} {projectTasks.length === 1 ? "task" : "tasks"}</span><span>{progress}%</span></div><div className="progress-track"><div style={{ width: `${progress}%` }} /></div>
-            <button className="project-add-task" onClick={() => onOpen(project.id)}>Open project details →</button>
-            <button className="project-add-task" onClick={() => openCreate("task", project.id)}>＋ Add a task to this project</button>
-          </article>;
-        }) : <div className="empty-card"><EmptyState title={projects.length ? "No projects match those filters." : "Give your next big idea a home."} description={projects.length ? "Try a different search or folder." : "Projects make it easier to keep related work and next steps together."} action={projects.length ? <button className="button button-secondary" onClick={() => { setQuery(""); setFolderFilter("all"); }}>Clear filters</button> : <button className="button button-secondary" onClick={() => openCreate("project")}>＋ Create a project</button>} /></div>}
-      </div>
-    </section>
-  );
-}
-
-function ProjectDetailPage({ project, tasks, notes, activity, openCreate, onEdit, onBack, taskActions, noteActions }) {
-  if (!project) return <section className="view active"><EmptyState title="Project not found" description="This project may have been deleted." action={<button className="button button-secondary" onClick={onBack}>Back to projects</button>} /></section>;
-  const projectTasks = tasks.filter(task => task.projectId === project.id);
-  const projectNotes = notes.filter(note => note.projectId === project.id);
-  const completed = projectTasks.filter(task => task.status === "done").length;
-  const progress = projectTasks.length ? Math.round(completed / projectTasks.length * 100) : 0;
-  return <section className="view active">
-    <PageIntro eyebrow="PROJECT SPACE" title={project.name} description={project.description || "A dedicated space for this project's tasks, notes, and progress."} action={<><button className="button button-secondary" onClick={onBack}>← All projects</button><button className="button button-primary" onClick={() => openCreate("task", project.id)}>＋ Add task</button><button className="button button-secondary" onClick={() => openCreate("note", project.id)}>＋ Add note</button></>} />
-    <div className="project-detail-stats card-surface"><div><strong>{projectTasks.length}</strong><span>Tasks</span></div><div><strong>{completed}</strong><span>Completed</span></div><div><strong>{progress}%</strong><span>Progress</span></div><button className="button button-secondary" onClick={() => onEdit(project)}>Edit project</button></div>
-    <div className="project-detail-grid">
-      <section><div className="section-heading"><h2>Tasks</h2></div><div className="task-list card-surface">{projectTasks.length ? projectTasks.map(task => <TaskRow key={task.id} task={task} projects={[project]} {...taskActions} />) : <EmptyState title="No tasks in this project yet" description="Add a next step to get moving." action={<button className="button button-secondary" onClick={() => openCreate("task", project.id)}>Add a task</button>} />}</div></section>
-      <section><div className="section-heading"><h2>Project notes</h2></div><div className="project-note-list card-surface">{projectNotes.length ? projectNotes.map(note => <article className="project-note" key={note.id}><div><strong>{note.title}</strong><p>{note.body}</p></div><div><button className="row-edit" onClick={() => noteActions.onEdit(note)} aria-label={`Edit ${note.title}`}>✎</button><button className="row-delete" onClick={() => noteActions.onDelete(note.id)} aria-label={`Delete ${note.title}`}>×</button></div></article>) : <EmptyState title="Keep project thoughts together" description="Add notes from this project space to find them here." action={<button className="button button-secondary" onClick={() => openCreate("note", project.id)}>Add a note</button>} />}</div></section>
-    </div>
-    <ActivityPanel items={activity.filter(item => item.projectId === project.id).slice(0, 10)} />
-  </section>;
-}
-
-function NotesPage({ notes, projects, openCreate, onDelete, onEdit }) {
-  const [query, setQuery] = useState("");
-  const [projectFilter, setProjectFilter] = useState("all");
-  const [sort, setSort] = useState("updated");
-  const visibleNotes = notes.filter(note => (projectFilter === "all" || (projectFilter === "" ? !note.projectId : note.projectId === projectFilter)) &&
-    `${note.title} ${note.body || ""} ${projects.find(project => project.id === note.projectId)?.name || ""}`.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => {
-    if (sort === "title") return a.title.localeCompare(b.title);
-    const updatedA = a.updatedAt || a.createdAt || "";
-    const updatedB = b.updatedAt || b.createdAt || "";
-    return sort === "oldest" ? updatedA.localeCompare(updatedB) : updatedB.localeCompare(updatedA);
-  });
-  const hasFilters = query || projectFilter !== "all";
-  return (
-    <section className="view active">
-      <PageIntro eyebrow="SPACE TO THINK" title="Your notes" description="Keep the little thoughts that might turn into something big." action={<button className="button button-primary" onClick={() => openCreate("note")}><span>＋</span> New note</button>} />
-      <div className="toolbar-extra">
-        <label className="search-field"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a note…" aria-label="Search notes" /></label>
-        <label className="sort-field">Project<select value={projectFilter} onChange={event => setProjectFilter(event.target.value)} aria-label="Filter notes by project"><option value="all">All projects</option><option value="">Unfiled</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
-        <label className="sort-field">Sort<select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort notes"><option value="updated">Recently updated</option><option value="oldest">Oldest</option><option value="title">Title</option></select></label>
-        <span className="result-count">{visibleNotes.length} {visibleNotes.length === 1 ? "note" : "notes"}</span>
-        {hasFilters && <button className="clear-filters" onClick={() => { setQuery(""); setProjectFilter("all"); }}>Clear filters</button>}
-      </div>
-      <div className="notes-grid">
-        {visibleNotes.length ? visibleNotes.map(note => <article className="note-card card-surface" key={note.id}>
-          <div className="note-card-top"><span className="note-symbol">✎</span><div><button className="row-edit" onClick={() => onEdit(note)} aria-label={`Edit ${note.title}`} title="Edit note">✎</button><button className="row-delete" onClick={() => onDelete(note.id)} aria-label={`Delete ${note.title}`} title="Delete note">×</button></div></div>
-          <h2>{note.title}</h2><p>{note.body || "A thought worth keeping."}</p>{note.projectId && projects.find(project => project.id === note.projectId) && <small>Project · {projects.find(project => project.id === note.projectId).name}</small>}<small>{new Date(note.updatedAt || note.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</small>
-        </article>) : <div className="empty-card"><EmptyState icon="✎" title={notes.length ? "No notes match those filters." : "Save a thought for later."} description={notes.length ? "Try a different search or project." : "Keep a useful idea, a meeting note, or something you don’t want to forget."} action={notes.length ? <button className="button button-secondary" onClick={() => { setQuery(""); setProjectFilter("all"); }}>Clear filters</button> : <button className="button button-secondary" onClick={() => openCreate("note")}>＋ Write a note</button>} /></div>}
-      </div>
-    </section>
-  );
-}
-
-function AssistantPage({ messages, aiConfigured, syncMode, onSend, onClear, navigate, focusMessageId }) {
-  const [message, setMessage] = useState("");
-  const [mode, setMode] = useState("general problem-solving");
-  const [sending, setSending] = useState(false);
-  const messagesRef = useRef(null);
-  useEffect(() => {
-    if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-  }, [messages, sending]);
-  useEffect(() => {
-    if (focusMessageId) document.getElementById(`message-${focusMessageId}`)?.scrollIntoView({ block: "center" });
-  }, [focusMessageId]);
-
-  async function submit(event) {
-    event.preventDefault();
-    const prompt = message.trim();
-    if (!prompt || sending) return;
-    setMessage("");
-    setSending(true);
-    try { await onSend(prompt, mode); }
-    finally { setSending(false); }
-  }
-
-  return (
-    <section className="view active">
-      <PageIntro eyebrow="THINK BETTER, TOGETHER" title={<>Your thought partner<span className="headline-accent">.</span></>} description="Plan a project, work through a problem, or just get unstuck. Start wherever you are." badge={<span className="assistant-badge"><span>✳</span> AI ASSISTANT</span>} />
-      <div className="assistant-layout">
-        <div className="chat-card card-surface">
-          <div className="chat-topline"><div className="assistant-avatar">✳</div><div><strong>Nexa assistant</strong><small><span className="online-dot" /> Here to help you think it through</small></div>
-            <select className="assistant-mode" value={mode} onChange={event => setMode(event.target.value)} aria-label="Choose an assistant focus"><option value="general problem-solving">Everyday help</option><option value="project planning and productivity">Project planning</option><option value="customer support problem-solving">Customer support</option></select>
-            <button className="icon-button chat-clear" onClick={onClear} aria-label="Clear conversation" title="Clear conversation">↺</button>
-          </div>
-          <div className="chat-messages" ref={messagesRef} aria-live="polite">
-            {messages.length ? messages.map(item => <div id={`message-${item.id}`} className={`message ${item.role === "user" ? "message-user" : "message-assistant"}`} key={item.id}>
-              {item.role === "assistant" && <span className="message-avatar">✳</span>}
-              <div className="message-bubble">{item.content.split("\n").map((line, index) => <Fragment key={index}>{index > 0 && <br />}{line}</Fragment>)}</div>
-            </div>) : <div className="chat-welcome"><div className="welcome-spark">✳</div><h2>Hey, where should we begin?</h2><p>Bring a question, a half-formed idea, or a knot you’d like to untangle. We’ll take it one step at a time.</p></div>}
-            {sending && <div className="message message-assistant"><span className="message-avatar">✳</span><div className="message-bubble typing-indicator"><span /><span /><span /></div></div>}
-          </div>
-          <div className="chat-compose-wrap">
-            {!messages.length && <div className="prompt-suggestions">
-              <button onClick={() => setMessage("Help me break down a big goal into doable next steps.")}>Break down a big goal</button>
-              <button onClick={() => setMessage("I feel stuck on a problem. Ask me a few questions to help me find a way forward.")}>Help me get unstuck</button>
-              <button onClick={() => setMessage("Help me plan a simple, realistic week.")}>Plan my week</button>
-            </div>}
-            <form className="chat-compose" onSubmit={submit}><textarea rows="1" maxLength={12000} value={message} onChange={event => setMessage(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form.requestSubmit(); } }} placeholder="What’s on your mind?" aria-label="Message the AI assistant" disabled={sending} /><button className="send-button" type="submit" aria-label="Send message" title="Send message" disabled={sending}>↑</button></form>
-            <p className="privacy-note">Your message is sent to the AI provider configured by your workspace admin. <button className="inline-link" onClick={() => navigate("settings")}>AI settings</button></p>
-          </div>
-        </div>
-        <aside className="assistant-aside">
-          <div className="assistant-side-card"><Eyebrow>A GOOD PLACE TO BEGIN</Eyebrow><h3>You can bring the messy version.</h3><p>Share what you know so far. We can make sense of the rest together.</p><div className="starter-list"><div><span>01</span> What’s the real challenge?</div><div><span>02</span> What have you tried so far?</div><div><span>03</span> What would “better” look like?</div></div></div>
-          <div className="local-note"><span>◉</span><div><strong>Your workspace stays yours</strong><p>{syncMode === "local" ? "Tasks, notes, and conversations are saved in your local project folder." : "Your workspace is stored with the sync provider selected in Settings."} Only messages you send are shared with your configured AI provider. {aiConfigured ? "" : "Set up an AI key in Settings to get assistant replies."}</p></div></div>
-        </aside>
-      </div>
-    </section>
-  );
-}
-
-function SettingsPage({
-  aiConfigured,
-  aiModel,
-  dataFile,
-  state,
-  darkMode,
-  onToggleTheme,
-  onImport,
-  onEnableNotifications,
-  onRemoveSamples,
-  overviewPreferences,
-  onUpdateOverview,
-  syncSettings,
-  syncSession,
-  syncStatus,
-  onUseLocal,
-  onConnectSupabase,
-  onConnectSelfHosted,
-  onSignOutSupabase
-}) {
-  const fileRef = useRef(null);
-  const [importMode, setImportMode] = useState("merge");
-  const [notificationStatus, setNotificationStatus] = useState(() =>
-    typeof Notification === "undefined" || !window.isSecureContext ? "unavailable" : Notification.permission
-  );
-  function exportBackup() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `nexaflow-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-  async function importBackup(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const imported = JSON.parse(await file.text());
-      await onImport(imported, importMode);
-    } catch (error) {
-      window.alert(error instanceof SyntaxError ? "That file is not valid JSON. Choose a NexaFlow backup file." : error.message);
-    } finally {
-      event.target.value = "";
-    }
-  }
-  async function enableNotifications() {
-    try {
-      const permission = await onEnableNotifications();
-      setNotificationStatus(permission);
-    } catch (error) {
-      window.alert(`Could not enable notifications: ${error.message}`);
-    }
-  }
-  function moveOverviewPanel(panelId, direction) {
-    const groupIds = Object.values(OVERVIEW_PANEL_GROUPS).find(ids => ids.includes(panelId));
-    if (!groupIds) return;
-    const groupOrder = overviewPreferences.order.filter(id => groupIds.includes(id));
-    const index = groupOrder.indexOf(panelId);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= groupOrder.length) return;
-    [groupOrder[index], groupOrder[target]] = [groupOrder[target], groupOrder[index]];
-    let nextGroupIndex = 0;
-    const order = overviewPreferences.order.map(id => groupIds.includes(id) ? groupOrder[nextGroupIndex++] : id);
-    onUpdateOverview({ ...overviewPreferences, order });
-  }
-  return (
-    <section className="view active">
-      <PageIntro eyebrow="YOUR WORKSPACE, YOUR RULES" title="Settings" description="A few details about where your data lives and how AI works." />
-      <div className="settings-grid">
-        <SyncSettings settings={syncSettings} session={syncSession} syncStatus={syncStatus} onUseLocal={onUseLocal} onConnectSupabase={onConnectSupabase} onConnectSelfHosted={onConnectSelfHosted} onSignOut={onSignOutSupabase} />
-        <section className="settings-card card-surface"><div className="settings-icon">✳</div><Eyebrow>AI CONNECTION</Eyebrow><h2>Make your assistant yours</h2>
-          <p className="settings-copy">Connect an OpenAI-compatible provider using environment variables on this computer. Your API key stays on the server and is never stored in the browser or project data.</p>
-          <div className="connection-status"><span className={`connection-dot ${aiConfigured ? "connected" : "disconnected"}`} /><span>{aiConfigured ? `Key configured · ${aiModel}` : "Not configured · add an API key below"}</span></div>
-          <div className="settings-code"><code>$env:NEXAFLOW_AI_API_KEY = "your-key"</code><code>$env:NEXAFLOW_AI_BASE_URL = "https://api.openai.com/v1"</code><code>$env:NEXAFLOW_AI_MODEL = "gpt-4o-mini"</code><code>npm run dev</code></div>
-          <p className="settings-footnote">Stop and restart the local server after changing these values. Compatible providers may use a different base URL and model.</p>
-        </section>
-        <section className="settings-card card-surface"><div className="settings-icon settings-icon-mint">▣</div><Eyebrow>{syncSettings.mode === "local" ? "LOCAL BY DESIGN" : "ON-DEVICE BACKUP"}</Eyebrow><h2>{syncSettings.mode === "local" ? "Your data, on your machine" : "A copy stays on this device"}</h2>
-          <p className="settings-copy">{syncSettings.mode === "local"
-            ? "Projects, tasks, notes, and assistant conversations are saved as a JSON file inside this project. They are not uploaded by NexaFlow."
-            : "NexaFlow keeps a browser copy for offline recovery. Your primary workspace is stored with the sync provider you selected."}</p>
-          {syncSettings.mode === "local" && <div className="data-location"><span>▤</span><code>{dataFile || "Loading…"}</code></div>}
-          <button className="button button-secondary" onClick={exportBackup}>Export a backup <span>↗</span></button>
-          <div className="import-controls"><label>Import behavior<select value={importMode} onChange={event => setImportMode(event.target.value)}><option value="merge">Merge into current workspace</option><option value="replace">Replace current workspace</option></select></label><input ref={fileRef} type="file" accept="application/json,.json" onChange={importBackup} hidden /><button className="button button-secondary" onClick={() => fileRef.current?.click()}>Import backup</button></div>
-          <p className="settings-footnote">{syncSettings.mode === "local"
-            ? "Use the backup button to download a copy. Keep the data folder private if other people can access this computer."
-            : "Use the backup button to download a portable copy. Browser storage is not encrypted, so protect access to this device."}</p>
-        </section>
-        <section className="settings-card card-surface"><div className="settings-icon settings-icon-mint">◐</div><Eyebrow>PERSONALIZE</Eyebrow><h2>Make it comfortable</h2><p className="settings-copy">Choose the appearance that works best for you.</p><button className="button button-secondary" onClick={onToggleTheme}>{darkMode ? "Switch to light mode" : "Switch to dark mode"}</button></section>
-        <section className="settings-card card-surface"><div className="settings-icon settings-icon-mint">▦</div><Eyebrow>YOUR OVERVIEW</Eyebrow><h2>Choose what you see first</h2><p className="settings-copy">Show or hide overview sections and reorder them within the main column or sidebar. Preferences stay on this device.</p><div className="overview-preference-list">{Object.entries(OVERVIEW_PANEL_GROUPS).map(([groupName, panelIds]) => {
-          const groupOrder = overviewPreferences.order.filter(id => panelIds.includes(id));
-          return <div className="overview-preference-group" key={groupName}>
-            <h3>{groupName === "main" ? "Main column" : "Sidebar"}</h3>
-            {groupOrder.map((panelId, index) => {
-              const panel = OVERVIEW_PANELS.find(item => item.id === panelId);
-              if (!panel) return null;
-              const isVisible = overviewPreferences.visible.includes(panelId);
-              return <div className="overview-preference-row" key={panelId}>
-                <label><input type="checkbox" checked={isVisible} onChange={event => {
-                  const visible = event.target.checked
-                    ? [...overviewPreferences.visible, panelId]
-                    : overviewPreferences.visible.filter(id => id !== panelId);
-                  onUpdateOverview({ ...overviewPreferences, visible });
-                }} />{panel.label}</label>
-                <div><button className="icon-button" disabled={index === 0} onClick={() => moveOverviewPanel(panelId, -1)} aria-label={`Move ${panel.label} up`}>↑</button><button className="icon-button" disabled={index === groupOrder.length - 1} onClick={() => moveOverviewPanel(panelId, 1)} aria-label={`Move ${panel.label} down`}>↓</button></div>
-              </div>;
-            })}
-          </div>;
-        })}</div></section>
-        <section className="settings-card card-surface"><div className="settings-icon">◷</div><Eyebrow>TASK REMINDERS</Eyebrow><h2>Stay in the loop</h2><p className="settings-copy">In-app reminders and optional browser notifications fire while a NexaFlow tab is open; missed reminders are checked when you return. Due dates are also highlighted in your task list and calendar.</p><div className="connection-status"><span className={`connection-dot ${notificationStatus === "granted" ? "connected" : "disconnected"}`} /><span>{notificationStatus === "granted" ? "Browser notifications enabled" : notificationStatus === "denied" ? "Browser notifications blocked in browser settings" : notificationStatus === "unavailable" ? "Browser notifications unavailable" : "Browser notifications not enabled"}</span></div>{notificationStatus !== "granted" && notificationStatus !== "denied" && notificationStatus !== "unavailable" && <button className="button button-secondary" onClick={enableNotifications}>Enable browser notifications</button>}</section>
-        {state.projects.some(item => item.sampleData) || state.tasks.some(item => item.sampleData) || state.notes.some(item => item.sampleData) ? <section className="settings-card card-surface"><div className="settings-icon settings-icon-mint">⌫</div><Eyebrow>STARTER CONTENT</Eyebrow><h2>Remove sample items</h2><p className="settings-copy">Remove only the example projects, tasks, and notes. Anything you created yourself will stay in your workspace.</p><button className="button button-secondary" onClick={onRemoveSamples}>Remove sample items</button></section> : null}
-      </div>
-    </section>
-  );
-}
 
 export default function App() {
-  const [state, setState] = useState(EMPTY_STATE);
+  const [state, setState] = useState(() => {
+    try {
+      const cached = localStorage.getItem("nexaflow-workspace-cache");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object") {
+          return { ...EMPTY_STATE, ...parsed };
+        }
+      }
+    } catch {}
+    return EMPTY_STATE;
+  });
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [savedTaskViews, setSavedTaskViews] = useState(readSavedTaskViews);
   const [ready, setReady] = useState(false);
   const [syncSettings, setSyncSettingsState] = useState(readSyncSettings);
   const [syncSession, setSyncSession] = useState(readSupabaseSession);
@@ -804,6 +187,7 @@ export default function App() {
   const [focusMessageId, setFocusMessageId] = useState("");
   const [installPrompt, setInstallPrompt] = useState(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("nexaflow-theme") === "dark");
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [timer, setTimer] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("nexaflow-focus-timer") || "{}");
@@ -821,6 +205,8 @@ export default function App() {
   const firedReminderKeys = useRef(new Set());
   const syncWarningShown = useRef(false);
   const reminderHistoryWarningShown = useRef(false);
+  const gSequenceTimer = useRef(null);
+  const inGSequence = useRef(false);
   const stateRef = useRef(state);
   const syncSettingsRef = useRef(syncSettings);
   const syncSessionRef = useRef(syncSession);
@@ -952,6 +338,8 @@ export default function App() {
         { id: makeId(), title: "A thought to come back to", body: "What would feel good to make progress on this week?", projectId, createdAt: now, updatedAt: now, sampleData: true }
       ],
       messages: [],
+      goals: [],
+      templates: [],
       activity: [
         { id: makeId(), label: "Sample workspace is ready to explore", projectId, createdAt: now, sampleData: true }
       ]
@@ -1084,8 +472,16 @@ export default function App() {
       }
       if (localStorage.getItem("nexaflow-sync-dirty") === "true") persist(stateRef.current);
     };
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
     window.addEventListener("online", syncOfflineChanges);
-    return () => window.removeEventListener("online", syncOfflineChanges);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", syncOfflineChanges);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
 
   useEffect(() => {
@@ -1098,13 +494,66 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    const handleNotificationClick = event => {
+      if (event.data?.type !== "open-task" || !event.data.taskId) return;
+      const task = stateRef.current.tasks.find(item => item.id === event.data.taskId);
+      if (task) openEdit("task", task);
+      navigate("tasks");
+    };
+    navigator.serviceWorker.addEventListener("message", handleNotificationClick);
+    return () => navigator.serviceWorker.removeEventListener("message", handleNotificationClick);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const taskId = new URLSearchParams(window.location.search).get("task");
+    const task = state.tasks.find(item => item.id === taskId);
+    if (!task) return;
+    setCreateItem({ type: "task", record: task });
+    navigate("tasks");
+    window.history.replaceState({}, "", "/workspace");
+  }, [ready, state.tasks]);
+
+  useEffect(() => {
     function handleShortcuts(event) {
       if (document.querySelector("dialog[open]")) return;
       const key = event.key.toLowerCase();
       const commandKey = event.ctrlKey || event.metaKey;
+      if (inGSequence.current) {
+        inGSequence.current = false;
+        clearTimeout(gSequenceTimer.current);
+        const navMap = {
+          t: "tasks",
+          b: "board",
+          c: "calendar",
+          f: "focus",
+          o: "overview",
+          p: "projects",
+          n: "notes",
+          g: "goals",
+          s: "settings",
+          m: "templates",
+          d: "dayPlan",
+          w: "weeklyReview"
+        };
+        if (navMap[key]) {
+          event.preventDefault();
+          navigate(navMap[key]);
+          return;
+        }
+      }
+      if (key === "g" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select, [role='textbox']"))) return;
+        inGSequence.current = true;
+        clearTimeout(gSequenceTimer.current);
+        gSequenceTimer.current = setTimeout(() => { inGSequence.current = false; }, 1200);
+        return;
+      }
       if (commandKey && key === "k") {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        setCommandPaletteOpen(open => !open);
         return;
       }
       if (event.altKey && event.shiftKey && ["t", "p", "n"].includes(key)) {
@@ -1152,6 +601,8 @@ export default function App() {
       const remaining = Math.max(0, Math.ceil((timer.endsAt - Date.now()) / 1000));
       setTimer(current => ({ ...current, remaining, running: remaining > 0 }));
       if (remaining === 0) {
+        playFocusCompletionSound();
+        triggerConfetti();
         notify("Focus session complete. Take a short break.");
         update(current => ({ ...current, activity: logActivity(current, `Completed a ${timer.duration}-minute focus session${timer.taskId ? ` on ${current.tasks.find(task => task.id === timer.taskId)?.title || "a task"}` : ""}`, current.tasks.find(task => task.id === timer.taskId)?.projectId || "") }));
       }
@@ -1195,10 +646,17 @@ export default function App() {
       notify(message);
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
         due.slice(0, 3).forEach(task => {
-          try {
-            new Notification("NexaFlow reminder", { body: task.title });
-          } catch (error) {
-            console.error("Could not show a browser reminder:", error);
+          const options = { body: task.title, tag: `nexaflow-reminder-${task.id}`, data: { taskId: task.id } };
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.ready.then(registration => registration.showNotification("NexaFlow reminder", options)).catch(error => {
+              console.error("Could not show a browser reminder:", error);
+            });
+          } else {
+            try {
+              new Notification("NexaFlow reminder", options);
+            } catch (error) {
+              console.error("Could not show a browser reminder:", error);
+            }
           }
         });
       }
@@ -1220,12 +678,22 @@ export default function App() {
     if (!task) return;
     const status = requestedStatus || (task.status === "done" ? "todo" : "done");
     if (task.status === status) return;
+    if (status === "done") {
+      const blockedBy = (task.dependencyIds || []).map(dependencyId => state.tasks.find(item => item.id === dependencyId)).filter(item => item && item.status !== "done");
+      if (blockedBy.length) {
+        notify(`Complete these tasks first: ${blockedBy.map(item => item.title).join(", ")}.`, "error");
+        return;
+      }
+    }
+    if (status === "done") {
+      triggerConfetti();
+    }
     const recurringTask = task.status !== "done" && status === "done" ? nextRecurringTask(task) : null;
     const label = status === "done" ? "Completed" : task.status === "done" ? "Reopened" : "Updated";
     const next = {
       ...state,
       activity: logActivity(state, `${label} task: ${task.title}`, task.projectId),
-      tasks: [...state.tasks.map(item => item.id === id ? { ...item, status } : item), ...(recurringTask ? [recurringTask] : [])]
+      tasks: [...state.tasks.map(item => item.id === id ? { ...item, status, inbox: status === "done" ? false : item.inbox } : item), ...(recurringTask ? [recurringTask] : [])]
     };
     setState(next);
     offerUndo(status === "done" ? `Completed “${task.title}”` : "Task status updated", current => ({
@@ -1239,8 +707,28 @@ export default function App() {
   }
 
   const taskActions = useMemo(() => ({
+    onCreate: taskData => create({
+      type: "task",
+      subtasks: [],
+      tags: [],
+      dependencyIds: [],
+      relatedNoteIds: [],
+      relatedTaskIds: [],
+      status: "todo",
+      priority: "medium",
+      ...taskData
+    }),
     onToggle: id => changeTaskStatus(id),
     onStatus: (id, status) => changeTaskStatus(id, status),
+    onReschedule: (id, newDueDate) => update(current => {
+      const task = current.tasks.find(item => item.id === id);
+      if (!task) return current;
+      return {
+        ...current,
+        activity: logActivity(current, `Rescheduled "${task.title}" to ${newDueDate || "unscheduled"}`, task.projectId),
+        tasks: current.tasks.map(item => item.id === id ? { ...item, dueDate: newDueDate } : item)
+      };
+    }),
     onToggleSubtask: (taskId, subtaskId) => update(current => {
       const task = current.tasks.find(item => item.id === taskId);
       const subtask = task?.subtasks?.find(item => item.id === subtaskId);
@@ -1251,15 +739,57 @@ export default function App() {
       };
     }),
     onEdit: task => setCreateItem({ type: "task", record: task }),
+    onDuplicate: task => {
+      const source = state.tasks.find(item => item.id === task.id);
+      if (!source) return;
+      const duplicateId = makeId();
+      const duplicate = {
+        ...source,
+        id: duplicateId,
+        title: `${source.title} (Copy)`,
+        status: source.status === "done" ? "todo" : source.status,
+        createdAt: new Date().toISOString(),
+        dependencyIds: [],
+        relatedTaskIds: [],
+        subtasks: (source.subtasks || []).map(subtask => ({ ...subtask, id: makeId(), done: false })),
+        reminderAt: source.reminderAt || "",
+        followUpDate: source.followUpDate || "",
+        scheduledAt: source.scheduledAt || "",
+        relatedNoteIds: [...(source.relatedNoteIds || [])]
+      };
+      update(current => ({
+        ...current,
+        activity: logActivity(current, `Duplicated task: ${source.title}`, source.projectId),
+        tasks: [duplicate, ...current.tasks]
+      }));
+      offerUndo(`Duplicated “${source.title}”`, current => ({
+        ...current,
+        tasks: current.tasks.filter(item => item.id !== duplicateId),
+        activity: logActivity(current, `Undid task duplication: ${source.title}`, source.projectId)
+      }));
+      notify(`Duplicated “${source.title}”.`);
+    },
     onDelete: id => {
       const task = state.tasks.find(item => item.id === id);
       if (task && window.confirm(`Delete "${task.title}"?`)) {
-        setState(current => ({ ...current, activity: logActivity(current, `Deleted task: ${task.title}`, task.projectId), tasks: current.tasks.filter(item => item.id !== id) }));
-        offerUndo(`Deleted “${task.title}”`, current => ({
+        const linkedTasks = state.tasks.filter(item => item.dependencyIds?.includes(id) || item.relatedTaskIds?.includes(id));
+        const linkedNotes = state.notes.filter(item => item.relatedTaskIds?.includes(id));
+        setState(current => ({
           ...current,
-          tasks: current.tasks.some(item => item.id === task.id) ? current.tasks : [...current.tasks, task],
-          activity: logActivity(current, `Restored task: ${task.title}`, task.projectId)
+          activity: logActivity(current, `Deleted task: ${task.title}`, task.projectId),
+          tasks: current.tasks.filter(item => item.id !== id).map(item => ({ ...item, dependencyIds: (item.dependencyIds || []).filter(dependencyId => dependencyId !== id), relatedTaskIds: (item.relatedTaskIds || []).filter(taskId => taskId !== id) })),
+          notes: current.notes.map(item => ({ ...item, relatedTaskIds: (item.relatedTaskIds || []).filter(taskId => taskId !== id) }))
         }));
+        offerUndo(`Deleted “${task.title}”`, current => {
+          const restoredTasks = current.tasks.map(item => linkedTasks.find(previous => previous.id === item.id) || item);
+          if (!restoredTasks.some(item => item.id === task.id)) restoredTasks.push(task);
+          return {
+            ...current,
+            tasks: restoredTasks,
+            notes: current.notes.map(item => linkedNotes.find(note => note.id === item.id) || item),
+            activity: logActivity(current, `Restored task: ${task.title}`, task.projectId)
+          };
+        });
       }
     }
   }), [state]);
@@ -1275,12 +805,51 @@ export default function App() {
     }
   }
 
-  function openCreate(type, projectId = "") {
-    setCreateItem({ type, projectId });
+  function openCreate(type, projectId = "", initialValues = {}) {
+    setCreateItem({ type, projectId, initialValues });
   }
 
   function openEdit(type, record) {
     setCreateItem({ type, record });
+  }
+
+  function saveTaskViews(views) {
+    try {
+      localStorage.setItem("nexaflow-saved-task-views", JSON.stringify(views));
+      setSavedTaskViews(views);
+    } catch (error) {
+      notify(`Could not save this task view: ${error.message}`, "error");
+    }
+  }
+
+  function updateSelectedTasks(ids, changes) {
+    const selected = new Set(ids);
+    if (changes.status === "done") {
+      const blocked = state.tasks.filter(task => selected.has(task.id) && (task.dependencyIds || []).some(id => !selected.has(id) && state.tasks.find(dependency => dependency.id === id)?.status !== "done"));
+      if (blocked.length) {
+        notify(`Complete dependencies first for: ${blocked.map(task => task.title).join(", ")}.`, "error");
+        return;
+      }
+    }
+    const normalizedChanges = changes.projectId === "__unassigned__" ? { ...changes, projectId: "" } : changes;
+    update(current => ({
+      ...current,
+      tasks: current.tasks.map(task => selected.has(task.id) ? { ...task, ...normalizedChanges, inbox: changes.status === "done" ? false : task.inbox } : task),
+      activity: logActivity(current, `Updated ${selected.size} selected tasks`)
+    }));
+    notify(`Updated ${selected.size} tasks.`);
+  }
+
+  function deleteSelectedTasks(ids) {
+    if (!ids.length || !window.confirm(`Delete ${ids.length} selected tasks?`)) return;
+    const selected = new Set(ids);
+    update(current => ({
+      ...current,
+      tasks: current.tasks.filter(task => !selected.has(task.id)).map(task => ({ ...task, dependencyIds: (task.dependencyIds || []).filter(id => !selected.has(id)), relatedTaskIds: (task.relatedTaskIds || []).filter(id => !selected.has(id)) })),
+      notes: current.notes.map(note => ({ ...note, relatedTaskIds: (note.relatedTaskIds || []).filter(id => !selected.has(id)) })),
+      activity: logActivity(current, `Deleted ${selected.size} selected tasks`)
+    }));
+    notify(`Deleted ${selected.size} tasks.`);
   }
 
   function startTimer() {
@@ -1321,33 +890,38 @@ export default function App() {
         ...state,
         activity: logActivity(state, `Updated ${item.type}: ${item.title}`, item.projectId || (item.type === "project" ? item.id : "")),
         tasks: item.type === "task" ? state.tasks.map(task => task.id === item.id ? {
-          ...task, title: item.title, details: item.details, projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, status: item.status,
+          ...task, title: item.title, details: item.details, projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, status: item.status, followUpDate: item.followUpDate, inbox: item.inbox && item.status !== "done", dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes,
           subtasks: item.subtasks.map(title => {
             const existing = (task.subtasks || []).find(subtask => subtask.title === title);
             return { id: existing?.id || makeId(), title, done: existing?.done || false };
           })
         } : task) : state.tasks,
         projects: item.type === "project" ? state.projects.map(project => project.id === item.id ? { ...project, name: item.title, description: item.details, folder: item.folder, tags: item.tags } : project) : state.projects,
-        notes: item.type === "note" ? state.notes.map(note => note.id === item.id ? { ...note, title: item.title, body: item.details, projectId: item.projectId, updatedAt: now } : note) : state.notes
+        notes: item.type === "note" ? state.notes.map(note => note.id === item.id ? { ...note, title: item.title, body: item.details, projectId: item.projectId, relatedTaskIds: item.relatedTaskIds, updatedAt: now } : note) : item.type === "task" ? state.notes.map(note => ({ ...note, relatedTaskIds: item.relatedNoteIds.includes(note.id) ? [...new Set([...(note.relatedTaskIds || []), item.id])] : (note.relatedTaskIds || []).filter(taskId => taskId !== item.id) })) : state.notes
       };
+      if (item.type === "note") {
+        next.tasks = state.tasks.map(task => ({ ...task, relatedNoteIds: item.relatedTaskIds.includes(task.id) ? [...new Set([...(task.relatedNoteIds || []), item.id])] : (task.relatedNoteIds || []).filter(noteId => noteId !== item.id) }));
+      }
       setCreateItem(null);
       update(next);
       if (await persist(next)) notify(`${item.type} updated.`);
       return;
     }
-    const task = item.type === "task" ? { id: makeId(), title: item.title, details: item.details, status: "todo", projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, tags: item.tags, subtasks: item.subtasks.map(title => ({ id: makeId(), title, done: false })), createdAt: now } : null;
+    const task = item.type === "task" ? { id: makeId(), title: item.title, details: item.details, status: item.status || "todo", projectId: item.projectId, dueDate: item.dueDate, reminderAt: item.reminderAt, priority: item.priority, recurrence: item.recurrence, followUpDate: item.followUpDate, inbox: item.inbox, tags: item.tags, dependencyIds: item.dependencyIds, relatedNoteIds: item.relatedNoteIds, scheduledAt: item.scheduledAt, estimatedMinutes: item.estimatedMinutes, subtasks: item.subtasks.map(title => ({ id: makeId(), title, done: false })), createdAt: now } : null;
     const project = item.type === "project" ? { id: makeId(), name: item.title, description: item.details, folder: item.folder, tags: item.tags, createdAt: now } : null;
-    const note = item.type === "note" ? { id: makeId(), title: item.title, body: item.details, projectId: item.projectId, createdAt: now, updatedAt: now } : null;
+    const note = item.type === "note" ? { id: makeId(), title: item.title, body: item.details, projectId: item.projectId, relatedTaskIds: item.relatedTaskIds, createdAt: now, updatedAt: now } : null;
     const next = {
       ...state,
       activity: logActivity(state, `Created ${item.type}: ${item.title}`, item.projectId || project?.id || ""),
-      tasks: task ? [task, ...state.tasks] : state.tasks,
+      tasks: task ? [task, ...state.tasks] : item.type === "note" ? state.tasks.map(existing => ({ ...existing, relatedNoteIds: item.relatedTaskIds.includes(existing.id) ? [...new Set([...(existing.relatedNoteIds || []), note.id])] : (existing.relatedNoteIds || []).filter(noteId => noteId !== note.id) })) : state.tasks,
       projects: project ? [...state.projects, project] : state.projects,
-      notes: note ? [...state.notes, note] : state.notes
+      notes: note ? [...state.notes, note] : item.type === "task" ? state.notes.map(existing => ({ ...existing, relatedTaskIds: item.relatedNoteIds.includes(existing.id) ? [...new Set([...(existing.relatedNoteIds || []), task.id])] : (existing.relatedNoteIds || []).filter(taskId => taskId !== task.id) })) : state.notes
     };
     update(next);
     setCreateItem(null);
-    if (item.projectId && state.projects.some(project => project.id === item.projectId)) {
+    if (activeView === "calendar" || activeView === "board") {
+      // stay on current view
+    } else if (item.projectId && state.projects.some(project => project.id === item.projectId)) {
       setSelectedProjectId(item.projectId);
       navigate("projectDetail");
     } else {
@@ -1355,6 +929,36 @@ export default function App() {
     }
     const saved = await persist(next);
     if (saved) notify(`${item.type === "task" ? "Task" : item.type === "project" ? "Project" : "Note"} saved to this workspace.`);
+  }
+
+  async function quickCreateTask({ title, dueDate, priority = "medium", projectId = "" }) {
+    const now = new Date().toISOString();
+    const task = {
+      id: makeId(),
+      title: title.trim(),
+      details: "",
+      status: "todo",
+      projectId: projectId || "",
+      dueDate: dueDate || "",
+      priority: priority || "medium",
+      recurrence: "",
+      followUpDate: "",
+      inbox: false,
+      tags: [],
+      dependencyIds: [],
+      relatedNoteIds: [],
+      scheduledAt: "",
+      estimatedMinutes: 25,
+      subtasks: [],
+      createdAt: now
+    };
+    const next = {
+      ...state,
+      tasks: [task, ...state.tasks],
+      activity: logActivity(state, `Created task: ${task.title}`, task.projectId)
+    };
+    update(next);
+    if (await persist(next)) notify(`Added task "${task.title}".`);
   }
 
   async function sendMessage(prompt, mode) {
@@ -1394,18 +998,21 @@ export default function App() {
     if (!project || !window.confirm(`Delete "${project.name}"? Its tasks will stay in your task list, but will no longer be linked to it.`)) return;
     const linkedTasks = state.tasks.filter(task => task.projectId === id);
     const linkedNotes = state.notes.filter(note => note.projectId === id);
+    const linkedGoals = (state.goals || []).filter(goal => goal.projectId === id);
     update(current => ({
       ...current,
       activity: logActivity(current, `Deleted project: ${project.name}`),
       projects: current.projects.filter(item => item.id !== id),
       tasks: current.tasks.map(task => task.projectId === id ? { ...task, projectId: "" } : task),
-      notes: current.notes.map(note => note.projectId === id ? { ...note, projectId: "" } : note)
+      notes: current.notes.map(note => note.projectId === id ? { ...note, projectId: "" } : note),
+      goals: (current.goals || []).map(goal => goal.projectId === id ? { ...goal, projectId: "" } : goal)
     }));
     offerUndo(`Deleted project “${project.name}”`, current => ({
       ...current,
       projects: current.projects.some(item => item.id === project.id) ? current.projects : [...current.projects, project],
       tasks: current.tasks.map(task => linkedTasks.find(item => item.id === task.id) || task),
       notes: current.notes.map(note => linkedNotes.find(item => item.id === note.id) || note),
+      goals: (current.goals || []).map(goal => linkedGoals.find(item => item.id === goal.id) || goal),
       activity: logActivity(current, `Restored project: ${project.name}`)
     }));
   }
@@ -1413,10 +1020,11 @@ export default function App() {
   function deleteNote(id) {
     const note = state.notes.find(item => item.id === id);
     if (note && window.confirm(`Delete "${note.title}"?`)) {
-      update(current => ({ ...current, activity: logActivity(current, `Deleted note: ${note.title}`), notes: current.notes.filter(item => item.id !== id) }));
+      update(current => ({ ...current, activity: logActivity(current, `Deleted note: ${note.title}`), notes: current.notes.filter(item => item.id !== id), tasks: current.tasks.map(task => ({ ...task, relatedNoteIds: (task.relatedNoteIds || []).filter(noteId => noteId !== id) })) }));
       offerUndo(`Deleted note “${note.title}”`, current => ({
         ...current,
         notes: current.notes.some(item => item.id === note.id) ? current.notes : [...current.notes, note],
+        tasks: current.tasks.map(task => note.relatedTaskIds?.includes(task.id) ? { ...task, relatedNoteIds: [...new Set([...(task.relatedNoteIds || []), note.id])] } : task),
         activity: logActivity(current, `Restored note: ${note.title}`)
       }));
     }
@@ -1634,48 +1242,67 @@ export default function App() {
   }
 
   async function importBackup(imported, mode) {
-    const keys = ["projects", "tasks", "notes", "messages"];
-    if (!imported || keys.some(key => !Array.isArray(imported[key]) || imported[key].some(item => !item || typeof item !== "object" || Array.isArray(item)))) {
+    const requiredKeys = ["projects", "tasks", "notes", "messages"];
+    const keys = [...requiredKeys, "goals", "templates"];
+    if (!imported || requiredKeys.some(key => !Array.isArray(imported[key]) || imported[key].some(item => !item || typeof item !== "object" || Array.isArray(item))) ||
+      ["goals", "templates"].some(key => imported[key] !== undefined && (!Array.isArray(imported[key]) || imported[key].some(item => !item || typeof item !== "object" || Array.isArray(item))))) {
       throw new Error("The backup must contain valid projects, tasks, notes, and messages arrays.");
     }
-    if (imported.projects.some(item => typeof item.name !== "string") ||
-      imported.tasks.some(item => typeof item.title !== "string") ||
-      imported.notes.some(item => typeof item.title !== "string") ||
-      imported.messages.some(item => !["user", "assistant"].includes(item.role) || typeof item.content !== "string")) {
+    const source = { ...imported, goals: imported.goals || [], templates: imported.templates || [] };
+    if (source.projects.some(item => typeof item.name !== "string") ||
+      source.tasks.some(item => typeof item.title !== "string") ||
+      source.notes.some(item => typeof item.title !== "string") ||
+      source.messages.some(item => !["user", "assistant"].includes(item.role) || typeof item.content !== "string") ||
+      source.goals.some(item => typeof item.title !== "string" || (item.milestones !== undefined && !Array.isArray(item.milestones))) ||
+      source.templates.some(item => typeof item.title !== "string" || !["task", "project"].includes(item.type))) {
       throw new Error("The backup contains records with invalid or missing fields.");
     }
-    const records = Object.fromEntries(keys.map(key => [key, imported[key].map(item => {
-      const base = { ...item, id: item.id || makeId() };
-      if (key === "projects") return { ...base, tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === "string") : [] };
-      if (key === "tasks") return {
-        ...base,
-        status: ["todo", "in-progress", "done"].includes(item.status) ? item.status : "todo",
-        priority: ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium",
-        tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === "string") : [],
-        subtasks: Array.isArray(item.subtasks) ? item.subtasks.filter(subtask => subtask && typeof subtask.title === "string").map(subtask => ({ ...subtask, id: subtask.id || makeId(), done: Boolean(subtask.done) })) : []
-      };
-      return base;
-    })]));
     if (mode === "replace" && !window.confirm("Replace all current workspace data with this backup? This cannot be undone.")) return;
+    const idMaps = {};
+    const mappedId = (map, id) => id ? map.get(id) : undefined;
+    const records = Object.fromEntries(keys.map(key => {
+      const existingIds = new Set(mode === "replace" ? [] : (state[key] || []).map(item => item.id).filter(Boolean));
+      const mapped = source[key].map(item => {
+        const id = item.id && !existingIds.has(item.id) ? item.id : makeId();
+        existingIds.add(id);
+        return { ...item, id };
+      });
+      idMaps[key] = new Map(source[key].map((item, index) => [item.id, mapped[index].id]));
+      return [key, mapped];
+    }));
+    records.projects = records.projects.map(project => ({ ...project, tags: Array.isArray(project.tags) ? project.tags.filter(tag => typeof tag === "string") : [] }));
+    records.tasks = records.tasks.map((task, index) => ({
+      ...task,
+      projectId: mappedId(idMaps.projects, source.tasks[index].projectId) || "",
+      status: ["todo", "in-progress", "waiting", "done"].includes(task.status) ? task.status : "todo",
+      followUpDate: typeof task.followUpDate === "string" ? task.followUpDate : "",
+      inbox: Boolean(task.inbox),
+      priority: ["low", "medium", "high"].includes(task.priority) ? task.priority : "medium",
+      tags: Array.isArray(task.tags) ? task.tags.filter(tag => typeof tag === "string") : [],
+      dependencyIds: Array.isArray(task.dependencyIds) ? [...new Set(task.dependencyIds.map(id => mappedId(idMaps.tasks, id)).filter(Boolean))] : [],
+      relatedNoteIds: Array.isArray(task.relatedNoteIds) ? [...new Set(task.relatedNoteIds.map(id => mappedId(idMaps.notes, id)).filter(Boolean))] : [],
+      estimatedMinutes: Math.max(0, Math.min(1440, Number(task.estimatedMinutes) || 0)),
+      subtasks: Array.isArray(task.subtasks) ? task.subtasks.filter(subtask => subtask && typeof subtask.title === "string").map(subtask => ({ ...subtask, id: subtask.id || makeId(), done: Boolean(subtask.done) })) : []
+    }));
+    records.notes = records.notes.map((note, index) => ({
+      ...note,
+      projectId: mappedId(idMaps.projects, source.notes[index].projectId) || "",
+      relatedTaskIds: Array.isArray(note.relatedTaskIds) ? [...new Set(note.relatedTaskIds.map(id => mappedId(idMaps.tasks, id)).filter(Boolean))] : []
+    }));
+    records.goals = records.goals.map((goal, index) => ({
+      ...goal,
+      projectId: mappedId(idMaps.projects, source.goals[index].projectId) || "",
+      milestones: Array.isArray(goal.milestones) ? goal.milestones.filter(item => item && typeof item.title === "string").map(item => ({ ...item, id: item.id || makeId(), done: Boolean(item.done) })) : []
+    }));
     let next;
     if (mode === "replace") {
-      next = { ...EMPTY_STATE, ...records, activity: Array.isArray(imported.activity) ? imported.activity.filter(item => item && typeof item.label === "string") : [] };
+      next = { ...EMPTY_STATE, ...records, activity: Array.isArray(source.activity) ? source.activity.filter(item => item && typeof item.label === "string").map(item => ({ ...item, projectId: mappedId(idMaps.projects, item.projectId) || "" })) : [] };
     } else {
       next = { ...state };
       for (const key of keys) {
-        const existingIds = new Set(next[key].map(item => item.id).filter(Boolean));
-        const additions = records[key].map(item => {
-          if (!item.id || !existingIds.has(item.id)) {
-            if (item.id) existingIds.add(item.id);
-            return item;
-          }
-          const copy = { ...item, id: makeId() };
-          existingIds.add(copy.id);
-          return copy;
-        });
-        next[key] = [...next[key], ...additions];
+        next[key] = [...(next[key] || []), ...records[key]];
       }
-      next.activity = [...(next.activity || []), ...(Array.isArray(imported.activity) ? imported.activity.filter(item => item && typeof item.label === "string") : [])];
+      next.activity = [...(next.activity || []), ...(Array.isArray(source.activity) ? source.activity.filter(item => item && typeof item.label === "string").map(item => ({ ...item, projectId: mappedId(idMaps.projects, item.projectId) || "" })) : [])];
     }
     next.activity = logActivity(next, `${mode === "replace" ? "Replaced" : "Merged"} workspace from backup`);
     update(next);
@@ -1700,15 +1327,20 @@ export default function App() {
 
   const page = {
     overview: <Overview state={state} openCreate={openCreate} navigate={navigate} taskActions={taskActions} preferences={overviewPreferences} />,
-    tasks: <TasksPage tasks={state.tasks} projects={state.projects} openCreate={openCreate} taskActions={taskActions} />,
-    board: <BoardPage tasks={state.tasks} projects={state.projects} taskActions={taskActions} />,
-    calendar: <CalendarPage tasks={state.tasks} navigate={navigate} onExportCalendar={exportCalendar} />,
-    focus: <FocusPage tasks={state.tasks} timer={timer} onStart={startTimer} onPause={pauseTimer} onReset={resetTimer} onTaskChange={taskId => setTimer(current => ({ ...current, taskId }))} />,
+    tasks: <TasksPage tasks={state.tasks} projects={state.projects} notes={state.notes} openCreate={openCreate} taskActions={taskActions} savedViews={savedTaskViews} onSaveView={saveTaskViews} onBulkUpdate={updateSelectedTasks} onBulkDelete={deleteSelectedTasks} />,
+    board: <BoardPage tasks={state.tasks} projects={state.projects} taskActions={taskActions} openCreate={openCreate} />,
+    calendar: <CalendarPage tasks={state.tasks} projects={state.projects} notes={state.notes} navigate={navigate} onExportCalendar={exportCalendar} openCreate={openCreate} taskActions={taskActions} onQuickCreate={quickCreateTask} />,
+    focus: <FocusPage tasks={state.tasks} timer={timer} onStart={startTimer} onPause={pauseTimer} onReset={resetTimer} onTaskChange={taskId => setTimer(current => ({ ...current, taskId }))} onCompleteTask={id => taskActions.onStatus(id, "done")} />,
     activity: <ActivityPage items={state.activity || []} />,
     projects: <ProjectsPage projects={state.projects} tasks={state.tasks} openCreate={openCreate} onDelete={deleteProject} onEdit={project => openEdit("project", project)} onOpen={id => { setSelectedProjectId(id); navigate("projectDetail"); }} />,
     projectDetail: <ProjectDetailPage project={state.projects.find(item => item.id === selectedProjectId)} tasks={state.tasks} notes={state.notes} activity={state.activity || []} openCreate={openCreate} onEdit={project => openEdit("project", project)} onBack={() => navigate("projects")} taskActions={taskActions} noteActions={{ onEdit: note => openEdit("note", note), onDelete: deleteNote }} />,
     assistant: <AssistantPage messages={state.messages} aiConfigured={aiConfigured} syncMode={syncSettings.mode} onSend={sendMessage} onClear={clearChat} navigate={navigate} focusMessageId={focusMessageId} />,
-    notes: <NotesPage notes={state.notes} projects={state.projects} openCreate={openCreate} onDelete={deleteNote} onEdit={note => openEdit("note", note)} />,
+    notes: <NotesPage notes={state.notes} projects={state.projects} tasks={state.tasks} openCreate={openCreate} onDelete={deleteNote} onEdit={note => openEdit("note", note)} />,
+    goals: <GoalsPage goals={state.goals || []} projects={state.projects} update={update} notify={notify} logActivity={logActivity} />,
+    templates: <TemplatesPage templates={state.templates || []} update={update} notify={notify} logActivity={logActivity} createItem={create} />,
+    dayPlan: <PlanMyDay state={state} tasks={state.tasks} update={update} persist={persist} notify={notify} logActivity={logActivity} navigate={navigate} />,
+    inbox: <QuickCaptureInbox state={state} tasks={state.tasks} update={update} persist={persist} notify={notify} logActivity={logActivity} onEdit={task => openEdit("task", task)} onComplete={id => taskActions.onStatus(id, "done")} onDelete={taskActions.onDelete} />,
+    weeklyReview: <WeeklyReview tasks={state.tasks} activity={state.activity || []} projects={state.projects} navigate={navigate} />,
     settings: <SettingsPage
       aiConfigured={aiConfigured}
       aiModel={aiModel}
@@ -1733,15 +1365,16 @@ export default function App() {
   const openTaskCount = state.tasks.filter(task => task.status !== "done").length;
 
   return (
-    <div className={`app-shell ${darkMode ? "theme-dark" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
+    <WorkspaceErrorBoundary>
+      <div className={`app-shell ${darkMode ? "theme-dark" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       {mobileNavOpen && <button className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" />}
       <aside id="workspace-navigation" className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
-        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span>Nexa<span className="brand-light">Flow</span></span></a>
+        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate("overview"); }} aria-label="NexaFlow home"><img className="brand-logo-image" src="/icon.svg" alt="" /><span>Nexa<span className="brand-light">Flow</span></span></a>
         <div className="workspace-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace pages">
-          {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["tasks", "▤", "My tasks"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
+          {[{ title: "PLAN", items: [["overview", "⌂", "Overview"], ["dayPlan", "◷", "Plan my day"], ["tasks", "▤", "My tasks"], ["inbox", "✦", "Quick capture"], ["board", "▦", "Kanban board"], ["calendar", "▦", "Calendar"], ["goals", "✳", "Goals"], ["weeklyReview", "↻", "Weekly review"]] }, { title: "ORGANIZE", items: [["projects", "▧", "Projects"], ["notes", "▧", "Notes"], ["templates", "▤", "Templates"], ["activity", "◷", "Activity"]] }, { title: "FOCUS", items: [["focus", "◷", "Focus timer"], ["assistant", "✳", "AI assistant"]] }].map(group => <div className="nav-group" key={group.title}>
             <div className="nav-group-label" aria-hidden="true">{group.title}</div>
-            {group.items.map(([view, icon, label]) => <button key={view} className={`nav-item ${activeView === view || (view === "projects" && activeView === "projectDetail") ? "active" : ""}`} onClick={() => navigate(view)} title={label} aria-current={activeView === view || (view === "projects" && activeView === "projectDetail") ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icon}</span>{label}{view === "tasks" && <span className="nav-count">{openTaskCount}</span>}{view === "assistant" && <span className="ai-nav-dot" aria-label="AI assistant" />}</button>)}
+            {group.items.map(([view, icon, label]) => <button key={view} className={`nav-item ${activeView === view || (view === "projects" && activeView === "projectDetail") ? "active" : ""}`} onClick={() => navigate(view)} title={label} aria-current={activeView === view || (view === "projects" && activeView === "projectDetail") ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icon}</span>{label}{view === "tasks" && <span className="nav-count">{openTaskCount}</span>}{view === "inbox" && state.tasks.some(task => task.inbox && task.status !== "done") && <span className="nav-count">{state.tasks.filter(task => task.inbox && task.status !== "done").length}</span>}{view === "assistant" && <span className="ai-nav-dot" aria-label="AI assistant" />}</button>)}
           </div>)}
         </nav>
         <div className="sidebar-bottom">
@@ -1754,18 +1387,39 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-nav-toggle" aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"} aria-expanded={mobileNavOpen} aria-controls="workspace-navigation" onClick={() => setMobileNavOpen(open => !open)}>{mobileNavOpen ? "×" : "☰"}</button>
           <div className="breadcrumb" aria-label={`Current page: ${VIEW_TITLES[activeView]}`}><span>My workspace</span><span className="breadcrumb-slash">/</span><strong>{VIEW_TITLES[activeView]}</strong></div>
-          <div className="global-search-wrap"><input ref={searchInputRef} value={globalQuery} onChange={event => setGlobalQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setGlobalQuery(""); }} placeholder="Search everything…" title="Search everything (Ctrl/Cmd + K)" aria-label="Search tasks, projects, notes and messages. Press Control or Command K to focus search." /><SearchResults query={globalQuery} state={state} onChoose={chooseSearchResult} /></div>
-          <div className="topbar-actions">{installPrompt && <button className="install-button" onClick={installApp}>Install app</button>}<div className={`save-indicator ${saveStatus.kind}`} role="status" aria-live="polite" title={connectionError || "Your workspace save status"}><span className="save-dot" /><span>{saveStatus.label}</span></div><button className="icon-button" onClick={() => setShowShortcuts(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button><button className="icon-button" onClick={() => navigate("settings")} aria-label="Settings" title="Settings">⚙</button><div className="avatar avatar-small" aria-label="My workspace">N</div></div>
+          <button
+            className="command-bar-trigger"
+            onClick={() => setCommandPaletteOpen(true)}
+            title="Open Command Palette (Ctrl+K / Cmd+K)"
+            aria-label="Open Command Palette"
+          >
+            <span className="command-bar-icon" aria-hidden="true">⌘</span>
+            <span className="command-bar-text">Search tasks, projects, actions…</span>
+            <kbd className="command-bar-kbd">Ctrl K</kbd>
+          </button>
+          <div className="global-search-wrap"><input ref={searchInputRef} value={globalQuery} onChange={event => setGlobalQuery(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setGlobalQuery(""); }} placeholder="Filter…" title="Quick filter" aria-label="Quick filter" /><SearchResults query={globalQuery} state={state} onChoose={chooseSearchResult} /></div>
+          <div className="topbar-actions">{installPrompt && <button className="install-button" onClick={installApp}>Install app</button>}<ConnectionStatus online={isOnline} /><div className={`save-indicator ${saveStatus.kind}`} role="status" aria-live="polite" title={connectionError || "Your workspace save status"}><span className="save-dot" /><span>{saveStatus.label}</span></div><button className="icon-button" onClick={() => setShowShortcuts(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button><button className="icon-button" onClick={() => navigate("settings")} aria-label="Settings" title="Settings">⚙</button><div className="avatar avatar-small" aria-label="My workspace">N</div></div>
         </header>
         <main className="page-content">
           {connectionError && <div className="connection-banner" role="status" aria-live="polite"><strong>Working in offline mode.</strong><span>{connectionError} Changes are saved in this browser and will sync when the local server is reachable again.</span><button className="button button-secondary" onClick={retryConnection}>Retry connection</button></div>}
-          {page}
+          <Suspense fallback={<div role="status">Loading {VIEW_TITLES[activeView]}…</div>}>{page}</Suspense>
         </main>
       </div>
-      <CreateDialog key={`${createItem?.type || "closed"}-${createItem?.record?.id || ""}`} item={createItem} projects={state.projects} onClose={() => setCreateItem(null)} onCreate={create} />
+      <CreateDialog key={`${createItem?.type || "closed"}-${createItem?.record?.id || ""}`} item={createItem} projects={state.projects} tasks={state.tasks} notes={state.notes} onClose={() => setCreateItem(null)} onCreate={create} />
       {showFirstRun && <FirstRunDialog onStartSample={startSampleWorkspace} onStartBlank={finishFirstRun} />}
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} onCreate={openCreate} />}
       {toast && <div className={`toast visible ${toast.type}`} role="status" aria-live="polite"><span>{toast.message}</span>{toast.actionLabel && <button className="toast-action" onClick={undoLastChange}>{toast.actionLabel}</button>}</div>}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        navigate={navigate}
+        state={state}
+        openCreate={openCreate}
+        onToggleTheme={toggleTheme}
+        onStartFocus={() => setTimer(current => ({ ...current, running: true }))}
+        darkMode={darkMode}
+      />
     </div>
+    </WorkspaceErrorBoundary>
   );
 }
