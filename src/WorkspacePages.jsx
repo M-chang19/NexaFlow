@@ -198,12 +198,26 @@ function Empty({ title, children }) {
   );
 }
 
-function PriorityBadge({ priority }) {
+function PriorityBadge({ priority, onClick, title }) {
   const level = PRIORITY_RANK[priority] === undefined ? "medium" : priority;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`priority-badge priority-${level} priority-clickable`}
+        onClick={onClick}
+        title={title || "Click to cycle priority"}
+      >
+        <i className="priority-dot" />{priorityLabel(level)}
+      </button>
+    );
+  }
   return <span className={`priority-badge priority-${level}`}><i className="priority-dot" />{priorityLabel(level)}</span>;
 }
 
-function TaskRow({ task, projects, taskActions, selected, onSelect, extra }) {
+function TaskRow({ task, projects, taskActions, selected, onSelect, extra, onTagClick }) {
+  const [addingSubtask, setAddingSubtask] = useState(false);
+  const [subtaskInput, setSubtaskInput] = useState("");
   const done = task.status === "done";
   const subtasks = task.subtasks || [];
   const meta = [
@@ -212,6 +226,15 @@ function TaskRow({ task, projects, taskActions, selected, onSelect, extra }) {
     task.estimatedMinutes ? `${task.estimatedMinutes} min` : "",
     task.recurrence && `Repeats ${task.recurrence}`
   ].filter(Boolean).join(" · ");
+
+  function handleAddSubtask(e) {
+    e.preventDefault();
+    if (!subtaskInput.trim() || !taskActions.onAddSubtask) return;
+    taskActions.onAddSubtask(task.id, subtaskInput.trim());
+    setSubtaskInput("");
+    setAddingSubtask(false);
+  }
+
   return (
     <div className="task-row-wrap">
       <article className={`task-row ${done ? "task-done" : ""} ${isOverdue(task) ? "task-overdue" : ""}`}>
@@ -223,19 +246,55 @@ function TaskRow({ task, projects, taskActions, selected, onSelect, extra }) {
           {task.status === "waiting" && <small className="task-waiting-note">Waiting{task.followUpDate ? ` · follow up ${formatDate(task.followUpDate)}` : ""}</small>}
         </div>
         <div className="task-badges">
-          <PriorityBadge priority={task.priority} />
-          {(task.tags || []).map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}
+          <PriorityBadge
+            priority={task.priority}
+            onClick={taskActions.onCyclePriority ? () => taskActions.onCyclePriority(task.id) : undefined}
+            title="Click to cycle priority (Low ➔ Medium ➔ High)"
+          />
+          {(task.tags || []).map(tag => (
+            <span
+              className={`tag-chip ${onTagClick ? "tag-chip-clickable" : ""}`}
+              key={tag}
+              onClick={onTagClick ? () => onTagClick(tag) : undefined}
+            >
+              {tag}
+            </span>
+          ))}
         </div>
         <select className={`task-status status-${task.status}`} value={task.status} onChange={event => taskActions.onStatus(task.id, event.target.value)} aria-label={`Status for ${task.title}`}>
           {STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
         <div className="task-row-actions">
           {extra}
+          {task.status !== "done" && (
+            <button
+              type="button"
+              className="row-reschedule"
+              title="Postpone +1 day"
+              onClick={() => taskActions.onReschedule(task.id, addDays(task.dueDate || todayKey(), 1))}
+            >
+              +1d
+            </button>
+          )}
+          <button type="button" className="row-subtask-trigger" title="Add subtask" onClick={() => setAddingSubtask(prev => !prev)}>+ Subtask</button>
           <button className="row-edit" onClick={() => taskActions.onEdit(task)}>Edit</button>
           <button className="row-duplicate" onClick={() => taskActions.onDuplicate(task)}>Duplicate</button>
           <button className="row-delete" onClick={() => taskActions.onDelete(task.id)}>Delete</button>
         </div>
       </article>
+      {addingSubtask && (
+        <form onSubmit={handleAddSubtask} className="subtask-quick-add-form">
+          <input
+            type="text"
+            value={subtaskInput}
+            onChange={e => setSubtaskInput(e.target.value)}
+            placeholder="Type subtask and press Enter…"
+            autoFocus
+          />
+          <button type="submit" className="button button-small button-primary">Add</button>
+          <button type="button" className="button button-small button-secondary" onClick={() => setAddingSubtask(false)}>Cancel</button>
+        </form>
+      )}
       {subtasks.length > 0 && (
         <ul className="task-subtasks">
           {subtasks.map(subtask => (
@@ -311,12 +370,27 @@ export function SearchResults({ query, state, onChoose }) {
 /* Overview                                                            */
 /* ------------------------------------------------------------------ */
 
+const FOCUS_TIPS = [
+  "The Two-Minute Rule: If it takes less than 2 minutes, do it right now.",
+  "Eat That Frog: Tackle your highest-priority, most challenging task first.",
+  "Single-tasking: Zero context switches create deep flow states.",
+  "Timeboxing: Block a dedicated 25m focus window on your calendar.",
+  "Momentum over perfection: A done 80% is better than an unstarted 100%.",
+  "Inbox Zero: Your mind is for having ideas, not holding them. Capture everything."
+];
+
 export function Overview({ state, openCreate, navigate, taskActions, preferences }) {
+  const [tipIndex, setTipIndex] = useState(0);
+  const [quickTitle, setQuickTitle] = useState("");
+  const [quickPriority, setQuickPriority] = useState("medium");
+  const [quickProjectId, setQuickProjectId] = useState("");
+  const [nextStepFilter, setNextStepFilter] = useState("all");
+
   const today = todayKey();
   const open = state.tasks.filter(task => task.status !== "done");
   const overdue = open.filter(task => task.dueDate && task.dueDate < today);
   const dueToday = open.filter(task => task.dueDate === today);
-  const nextSteps = [...open].sort(byUrgency).slice(0, 5);
+  const nextSteps = [...open].sort(byUrgency).slice(0, 8);
   const doneCount = state.tasks.length - open.length;
   const percent = state.tasks.length ? Math.round((doneCount / state.tasks.length) * 100) : 0;
   const totalEstimatedMinutes = open.reduce((acc, t) => acc + (Number(t.estimatedMinutes) || 0), 0);
@@ -327,6 +401,24 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
   const suggestion = nextSteps[0];
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
+  const filteredNextSteps = useMemo(() => {
+    if (nextStepFilter === "high") return nextSteps.filter(t => t.priority === "high");
+    if (nextStepFilter === "today") return nextSteps.filter(t => t.dueDate === today);
+    return nextSteps;
+  }, [nextSteps, nextStepFilter, today]);
+
+  function handleQuickCapture(e) {
+    e.preventDefault();
+    if (!quickTitle.trim() || !taskActions.onCreate) return;
+    taskActions.onCreate({
+      title: quickTitle.trim(),
+      priority: quickPriority,
+      projectId: quickProjectId,
+      status: "todo"
+    });
+    setQuickTitle("");
+  }
 
   const panels = {
     hero: (
@@ -344,11 +436,23 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
     tasks: (
       <section className="section-block">
         <SectionHeading title="Next steps" count={open.length}>
-          <button className="link-button" onClick={() => navigate("tasks")}>View all</button>
+          <div className="overview-task-filters">
+            {[["all", "All"], ["today", "Due today"], ["high", "⚡ High"]].map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                className={`filter-tab ${nextStepFilter === val ? "active" : ""}`}
+                onClick={() => setNextStepFilter(val)}
+              >
+                {lbl}
+              </button>
+            ))}
+            <button className="link-button" onClick={() => navigate("tasks")}>View all →</button>
+          </div>
         </SectionHeading>
-        {nextSteps.length === 0
-          ? <div className="card-surface"><Empty title="No open tasks">Add a task to get started.</Empty></div>
-          : <div className="task-list card-surface">{nextSteps.map(task => <TaskRow key={task.id} task={task} projects={state.projects} taskActions={taskActions} />)}</div>}
+        {filteredNextSteps.length === 0
+          ? <div className="card-surface"><Empty title="No tasks match this filter">Try selecting a different filter or add a task below.</Empty></div>
+          : <div className="task-list card-surface">{filteredNextSteps.map(task => <TaskRow key={task.id} task={task} projects={state.projects} taskActions={taskActions} />)}</div>}
       </section>
     ),
     insights: (
@@ -406,6 +510,46 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
           <div className="date-pill"><span className="date-icon" aria-hidden="true">▦</span><span><small>Today</small>{new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</span></div>
         </div>
       </div>
+
+      <div className="overview-focus-tip card-surface">
+        <span className="tip-sparkle-icon" aria-hidden="true">💡</span>
+        <div className="tip-content">
+          <strong>Daily Focus Tip:</strong>
+          <span>{FOCUS_TIPS[tipIndex]}</span>
+        </div>
+        <button
+          type="button"
+          className="button button-small button-secondary tip-shuffle-btn"
+          onClick={() => setTipIndex(i => (i + 1) % FOCUS_TIPS.length)}
+          title="Shuffle focus advice"
+        >
+          🎲 Next tip
+        </button>
+      </div>
+
+      <form onSubmit={handleQuickCapture} className="overview-inline-capture card-surface">
+        <span className="capture-icon" aria-hidden="true">⚡</span>
+        <input
+          type="text"
+          value={quickTitle}
+          onChange={e => setQuickTitle(e.target.value)}
+          placeholder="Quick capture a task (press Enter to save)…"
+          aria-label="Quick capture task"
+        />
+        <select value={quickPriority} onChange={e => setQuickPriority(e.target.value)} aria-label="Priority">
+          <option value="low">Low priority</option>
+          <option value="medium">Medium priority</option>
+          <option value="high">High priority</option>
+        </select>
+        {state.projects.length > 0 && (
+          <select value={quickProjectId} onChange={e => setQuickProjectId(e.target.value)} aria-label="Project">
+            <option value="">No project</option>
+            {state.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
+        <button type="submit" className="button button-primary">Add Task</button>
+      </form>
+
       <div className="overview-quick-actions">
         {[["task", "quick-task", "＋", "New task", "Capture the next step"], ["project", "quick-project", "▧", "New project", "Group related work"], ["note", "quick-note", "✎", "New note", "Write something down"]].map(([type, tone, icon, title, hint]) => (
           <button key={type} className="overview-create-action" onClick={() => openCreate(type)}>
@@ -415,6 +559,24 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
           </button>
         ))}
       </div>
+
+      {state.projects.length > 0 && (
+        <div className="overview-project-chips">
+          <span className="chips-label">Jump to project:</span>
+          {state.projects.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              className="project-chip-btn"
+              onClick={() => navigate("projects")}
+              title={`View ${p.name}`}
+            >
+              <i className="chip-dot" />{p.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <ProductivityHeatmap tasks={state.tasks} activity={state.activity || []} />
       <div className="overview-grid">
         <div className="overview-main">{renderGroup(OVERVIEW_GROUPS.main)}</div>
@@ -556,16 +718,52 @@ export function BoardPage({ tasks, projects, taskActions, openCreate }) {
   const [overColumn, setOverColumn] = useState("");
   const [draggingTaskId, setDraggingTaskId] = useState(null);
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [boardQuery, setBoardQuery] = useState("");
+  const [addingColumn, setAddingColumn] = useState(null);
+  const [newCardTitle, setNewCardTitle] = useState("");
+  const [expandedCardId, setExpandedCardId] = useState(null);
 
   const filteredTasks = useMemo(() => {
-    if (priorityFilter === "all") return tasks;
-    return tasks.filter(t => t.priority === priorityFilter);
-  }, [tasks, priorityFilter]);
+    let list = tasks;
+    if (priorityFilter !== "all") list = list.filter(t => t.priority === priorityFilter);
+    if (boardQuery.trim()) {
+      const q = boardQuery.trim().toLowerCase();
+      list = list.filter(t => t.title.toLowerCase().includes(q) || (t.tags || []).some(tag => tag.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [tasks, priorityFilter, boardQuery]);
+
+  function handleInlineCardSubmit(e, status) {
+    e.preventDefault();
+    if (!newCardTitle.trim()) {
+      setAddingColumn(null);
+      return;
+    }
+    if (taskActions.onCreate) {
+      taskActions.onCreate({
+        title: newCardTitle.trim(),
+        status,
+        priority: "medium"
+      });
+    }
+    setNewCardTitle("");
+    setAddingColumn(null);
+  }
 
   return (
     <>
       <PageIntro eyebrow="Board" title="Kanban board" description="Drag cards between columns, or use the arrows.">
         <div className="board-top-actions">
+          <div className="board-search-wrap">
+            <input
+              type="search"
+              className="board-search-input"
+              value={boardQuery}
+              onChange={e => setBoardQuery(e.target.value)}
+              placeholder="Search board cards…"
+              aria-label="Search board cards"
+            />
+          </div>
           <div className="board-filter-group" role="group" aria-label="Filter board by priority">
             {[["all", "All"], ["high", "⚡ High"], ["medium", "Medium"], ["low", "Low"]].map(([val, lbl]) => (
               <button
@@ -609,8 +807,35 @@ export function BoardPage({ tasks, projects, taskActions, openCreate }) {
                   <h2>{label}</h2>
                   <span className="kanban-count-badge">{column.length}</span>
                 </div>
-                <button className="kanban-add-button" aria-label={`Add task to ${label}`} onClick={() => openCreate("task", "", { status })}>＋</button>
+                <button
+                  className="kanban-add-button"
+                  aria-label={`Add task to ${label}`}
+                  title={`Add card to ${label}`}
+                  onClick={() => {
+                    setAddingColumn(current => current === status ? null : status);
+                    setNewCardTitle("");
+                  }}
+                >
+                  ＋
+                </button>
               </div>
+
+              {addingColumn === status && (
+                <form onSubmit={e => handleInlineCardSubmit(e, status)} className="kanban-inline-add-card">
+                  <input
+                    type="text"
+                    value={newCardTitle}
+                    onChange={e => setNewCardTitle(e.target.value)}
+                    placeholder={`New task in ${label}…`}
+                    autoFocus
+                  />
+                  <div className="inline-add-actions">
+                    <button type="submit" className="button button-small button-primary">Add</button>
+                    <button type="button" className="button button-small button-secondary" onClick={() => setAddingColumn(null)}>Cancel</button>
+                  </div>
+                </form>
+              )}
+
               <div className="kanban-column-body">
                 {column.length === 0 && (
                   <div className="kanban-empty-column"><span className="kanban-empty-icon" aria-hidden="true">▢</span><p>Nothing in {label.toLowerCase()}.</p></div>
@@ -632,20 +857,61 @@ export function BoardPage({ tasks, projects, taskActions, openCreate }) {
                       onDragEnd={() => setDraggingTaskId(null)}
                     >
                       <div className="kanban-task-top">
-                        <PriorityBadge priority={task.priority} />
+                        <PriorityBadge
+                          priority={task.priority}
+                          onClick={taskActions.onCyclePriority ? () => taskActions.onCyclePriority(task.id) : undefined}
+                          title="Click to cycle priority"
+                        />
                         {task.dueDate && <small className={isOverdue(task) ? "task-waiting-note" : ""}>{formatDate(task.dueDate)}</small>}
                       </div>
                       <span className="kanban-task-title">{task.title}</span>
                       {project && <span className="kanban-task-project"><i className="task-project-dot" />{project}</span>}
                       {subtasks.length > 0 && (
                         <div className="kanban-subtask-progress">
-                          <span className="subtask-fraction">{doneSubtasks}/{subtasks.length} subtasks</span>
+                          <button
+                            type="button"
+                            className="kanban-subtask-toggle-btn"
+                            onClick={() => setExpandedCardId(id => id === task.id ? null : task.id)}
+                            title="Expand subtasks"
+                          >
+                            <span className="subtask-fraction">{doneSubtasks}/{subtasks.length} subtasks</span>
+                            <span className="subtask-chevron">{expandedCardId === task.id ? "▲" : "▼"}</span>
+                          </button>
                           <div className="kanban-subtask-bar"><div className="kanban-subtask-fill" style={{ width: `${(doneSubtasks / subtasks.length) * 100}%` }} /></div>
+                          {expandedCardId === task.id && (
+                            <ul className="kanban-card-subtask-list">
+                              {subtasks.map(s => (
+                                <li key={s.id}>
+                                  <label>
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(s.done)}
+                                      onChange={() => taskActions.onToggleSubtask(task.id, s.id)}
+                                    />
+                                    <span className={s.done ? "card-subtask-done" : ""}>{s.title}</span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                         </div>
                       )}
                       {(task.tags || []).length > 0 && <div className="kanban-task-tags">{task.tags.map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
                       <div className="kanban-task-actions">
                         <button aria-label="Move left" disabled={columnIndex === 0} onClick={() => taskActions.onStatus(task.id, STATUSES[columnIndex - 1][0])}>←</button>
+                        {task.status !== "done" && (
+                          <button
+                            type="button"
+                            className="kanban-btn-complete"
+                            title="Mark done"
+                            onClick={() => {
+                              taskActions.onStatus(task.id, "done");
+                              triggerConfetti();
+                            }}
+                          >
+                            ✓
+                          </button>
+                        )}
                         <button onClick={() => taskActions.onEdit(task)}>Edit</button>
                         <button aria-label="Move right" disabled={columnIndex === STATUSES.length - 1} onClick={() => taskActions.onStatus(task.id, STATUSES[columnIndex + 1][0])}>→</button>
                       </div>
@@ -807,8 +1073,10 @@ export function CalendarPage({ tasks, projects, onExportCalendar, openCreate, ta
             <div className="calendar-day-title-row">
               <h2>{formatLongDate(selected)}</h2>
               <div className="calendar-day-nav-buttons">
-                <button className="button button-small button-secondary" onClick={() => selectDay(addDays(selected, -1))}>Previous day</button>
-                <button className="button button-small button-secondary" onClick={() => selectDay(addDays(selected, 1))}>Next day</button>
+                <button className="button button-small button-secondary" onClick={() => selectDay(today)}>Today</button>
+                <button className="button button-small button-secondary" onClick={() => selectDay(addDays(selected, -1))}>‹ Prev day</button>
+                <button className="button button-small button-secondary" onClick={() => selectDay(addDays(selected, 1))}>Next day ›</button>
+                <button className="button button-small button-secondary" onClick={() => selectDay(addDays(selected, 7))}>+1 Week</button>
               </div>
             </div>
           </div>
@@ -861,6 +1129,8 @@ export function CalendarPage({ tasks, projects, onExportCalendar, openCreate, ta
 export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChange, onCompleteTask }) {
   const [ambientSound, setAmbientSound] = useState("off");
   const [soundVolume, setSoundVolume] = useState(0.4);
+  const [zenMode, setZenMode] = useState(false);
+  const [sessionCount, setSessionCount] = useState(() => Number(localStorage.getItem("nexaflow-focus-sessions-count") || 0));
 
   useEffect(() => {
     return () => {
@@ -886,10 +1156,51 @@ export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChang
   const clock = `${pad(Math.floor(remaining / 60))}:${pad(remaining % 60)}`;
   const task = tasks.find(item => item.id === timer.taskId);
   const state = timer.running ? "FOCUSING" : remaining === 0 ? "COMPLETE" : remaining < total ? "PAUSED" : "READY";
+
+  function handleCompleteAndNext() {
+    if (!task) return;
+    onCompleteTask(task.id);
+    triggerConfetti();
+    const nextTask = open.find(item => item.id !== task.id);
+    if (nextTask) {
+      onTaskChange(nextTask.id);
+    } else {
+      onTaskChange("");
+    }
+    const newCount = sessionCount + 1;
+    setSessionCount(newCount);
+    localStorage.setItem("nexaflow-focus-sessions-count", String(newCount));
+  }
+
   return (
     <>
-      <PageIntro eyebrow="Focus" title="Focus timer" description="One task, one block of time." />
-      <section className="focus-timer-card">
+      <PageIntro eyebrow="Focus" title="Focus timer" description="One task, one block of time.">
+        <button
+          type="button"
+          className="button button-secondary zen-mode-btn"
+          onClick={() => setZenMode(z => !z)}
+          title="Toggle distraction-free zen mode"
+        >
+          {zenMode ? "✕ Exit Zen Mode" : "🪟 Zen Mode"}
+        </button>
+      </PageIntro>
+
+      <div className="focus-session-stats">
+        <span className="stats-pill">🔥 <strong>{sessionCount}</strong> sessions completed today</span>
+        {task && <span className="stats-pill stats-task-pill">🎯 Focus target: <strong>{task.title}</strong></span>}
+      </div>
+
+      <section className={`focus-timer-card ${zenMode ? "zen-mode-active" : ""}`}>
+        {zenMode && (
+          <button
+            type="button"
+            className="zen-close-button"
+            onClick={() => setZenMode(false)}
+            aria-label="Exit Zen Mode"
+          >
+            ✕ Exit Zen
+          </button>
+        )}
         <div className={`timer-ring ${timer.running ? "timer-running" : ""}`} style={{ "--timer-progress": `${percent}%` }} role="timer" aria-label={`${clock} remaining`}>
           <div className="timer-ring-inner">
             <span className="timer-digits">{clock}</span>
@@ -901,7 +1212,15 @@ export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChang
           <div className="focus-task-details-ribbon">
             {task.dueDate && <span className="focus-due-badge">Due {formatDate(task.dueDate)}</span>}
             <PriorityBadge priority={task.priority} />
-            {task.status !== "done" && <button className="button button-secondary focus-complete-btn" onClick={() => onCompleteTask(task.id)}>Mark done</button>}
+            {task.status !== "done" && (
+              <button
+                className="button button-primary focus-complete-btn"
+                onClick={handleCompleteAndNext}
+                title="Mark this task done and focus on next"
+              >
+                ✓ Mark done &amp; next
+              </button>
+            )}
           </div>
         )}
         <label className="focus-task-select">
@@ -912,10 +1231,11 @@ export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChang
           </select>
         </label>
         <div className="focus-duration" role="group" aria-label="Session length">
-          {[15, 25, 45].map(minutes => (
+          {[15, 25, 45, 60].map(minutes => (
             <button key={minutes} className={timer.duration === minutes ? "active" : ""} aria-pressed={timer.duration === minutes} onClick={() => onReset(minutes)}>{minutes} min</button>
           ))}
           <button className={`break-button ${timer.duration === 5 ? "active" : ""}`} aria-pressed={timer.duration === 5} onClick={() => onReset(5)}>5 min break</button>
+          <button className={`break-button ${timer.duration === 15 ? "active" : ""}`} aria-pressed={timer.duration === 15} onClick={() => onReset(15)}>15 min break</button>
         </div>
         <div className="focus-ambient-section">
           <div className="ambient-header">
@@ -958,10 +1278,67 @@ export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChang
 export function ActivityPage({ items }) {
   return (
     <>
-      <PageIntro eyebrow="Activity" title="Activity history" description="The latest 100 changes in this workspace." />
+      <PageIntro eyebrow="Activity" title="Activity history" description="The latest changes in this workspace." />
       {items.length === 0
         ? <div className="card-surface"><Empty title="No activity yet">Create or complete something and it will appear here.</Empty></div>
-        : <ul className="activity-list card-surface">{items.map(item => <li className="activity-item" key={item.id}><span>{item.label}</span><small>{formatDateTime(item.createdAt)}</small></li>)}</ul>}
+        : (
+          <ActivityListInteractive items={items} />
+        )}
+    </>
+  );
+}
+
+function ActivityListInteractive({ items }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    let list = items;
+    if (filter !== "all") {
+      list = list.filter(item => {
+        const text = (item.label || "").toLowerCase();
+        if (filter === "tasks") return text.includes("task");
+        if (filter === "projects") return text.includes("project");
+        if (filter === "notes") return text.includes("note");
+        if (filter === "goals") return text.includes("goal");
+        return true;
+      });
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(item => (item.label || "").toLowerCase().includes(q));
+    }
+    return list;
+  }, [items, filter, search]);
+
+  return (
+    <>
+      <div className="toolbar card-surface">
+        <label className="search-field">
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search activity log…"
+            aria-label="Search activity"
+          />
+        </label>
+        <div className="board-filter-group" role="group" aria-label="Filter activity by type">
+          {[["all", "All"], ["tasks", "Tasks"], ["projects", "Projects"], ["notes", "Notes"], ["goals", "Goals"]].map(([val, lbl]) => (
+            <button
+              key={val}
+              type="button"
+              className={`filter-tab ${filter === val ? "active" : ""}`}
+              onClick={() => setFilter(val)}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+      {filtered.length === 0
+        ? <div className="card-surface"><Empty title="No activity matches your search" /></div>
+        : <ul className="activity-list card-surface">{filtered.map(item => <li className="activity-item" key={item.id}><span>{item.label}</span><small>{formatDateTime(item.createdAt)}</small></li>)}</ul>}
     </>
   );
 }
@@ -971,16 +1348,61 @@ export function ActivityPage({ items }) {
 /* ------------------------------------------------------------------ */
 
 export function ProjectsPage({ projects, tasks, openCreate, onDelete, onEdit, onOpen }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+
+  const filtered = useMemo(() => {
+    let list = projects;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(p => (p.name || "").toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q) || (p.folder || "").toLowerCase().includes(q));
+    }
+    if (filter === "active") {
+      list = list.filter(p => tasks.some(t => t.projectId === p.id && t.status !== "done"));
+    } else if (filter === "overdue") {
+      list = list.filter(p => tasks.some(t => t.projectId === p.id && isOverdue(t)));
+    } else if (filter === "completed") {
+      list = list.filter(p => {
+        const own = tasks.filter(t => t.projectId === p.id);
+        return own.length > 0 && own.every(t => t.status === "done");
+      });
+    }
+    return list;
+  }, [projects, tasks, search, filter]);
+
   return (
     <>
       <PageIntro eyebrow="Projects" title="Projects" description={`${projects.length} ${projects.length === 1 ? "project" : "projects"} in this workspace.`}>
         <button className="button button-primary" onClick={() => openCreate("project")}>New project</button>
       </PageIntro>
-      {projects.length === 0
-        ? <div className="card-surface"><Empty title="No projects yet">Projects group related tasks, notes and goals.</Empty></div>
+      <div className="toolbar card-surface">
+        <label className="search-field">
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search projects…"
+            aria-label="Search projects"
+          />
+        </label>
+        <div className="board-filter-group" role="group" aria-label="Filter projects">
+          {[["all", "All"], ["active", "Active"], ["overdue", "Has Overdue"], ["completed", "Completed"]].map(([val, lbl]) => (
+            <button
+              key={val}
+              type="button"
+              className={`filter-tab ${filter === val ? "active" : ""}`}
+              onClick={() => setFilter(val)}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+      {filtered.length === 0
+        ? <div className="card-surface"><Empty title={projects.length ? "No projects match your filter" : "No projects yet"}>{projects.length ? "" : "Projects group related tasks, notes and goals."}</Empty></div>
         : (
           <div className="project-grid">
-            {projects.map((project, index) => {
+            {filtered.map((project, index) => {
               const own = tasks.filter(task => task.projectId === project.id);
               const done = own.filter(task => task.status === "done").length;
               const late = own.filter(isOverdue).length;
@@ -992,9 +1414,10 @@ export function ProjectsPage({ projects, tasks, openCreate, onDelete, onEdit, on
                   {project.folder && <small>{project.folder}</small>}
                   {project.description && <p>{project.description}</p>}
                   <div className="progress-track" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${project.name} progress`}><div style={{ width: `${percent}%` }} /></div>
-                  <span className={`project-health ${late ? "project-health-risk" : ""}`}>{late ? `${late} overdue` : "On track"}<small>{done} of {own.length} tasks done</small></span>
+                  <span className={`project-health ${late ? "project-health-risk" : ""}`}>{late ? `${late} overdue` : "On track"}<small>{done} of {own.length} tasks done ({percent}%)</small></span>
                   {(project.tags || []).length > 0 && <div className="task-badges">{project.tags.map(tag => <span className="tag-chip" key={tag}>{tag}</span>)}</div>}
                   <div className="task-row-actions">
+                    <button className="row-subtask-trigger" title="Add task to this project" onClick={() => openCreate("task", project.id)}>+ Task</button>
                     <button className="row-edit" onClick={() => onOpen(project.id)}>Open</button>
                     <button className="row-edit" onClick={() => onEdit(project)}>Edit</button>
                     <button className="row-delete" onClick={() => onDelete(project.id)}>Delete</button>
@@ -1009,25 +1432,72 @@ export function ProjectsPage({ projects, tasks, openCreate, onDelete, onEdit, on
 }
 
 export function ProjectDetailPage({ project, tasks, notes, activity, openCreate, onEdit, onBack, taskActions, noteActions }) {
+  const [inlineTaskTitle, setInlineTaskTitle] = useState("");
+  const [taskFilter, setTaskFilter] = useState("all");
+
   if (!project) {
     return <div className="card-surface"><Empty title="Project not found">It may have been deleted. <button className="link-button" onClick={onBack}>Back to projects</button></Empty></div>;
   }
   const ownTasks = tasks.filter(task => task.projectId === project.id).sort(byUrgency);
   const ownNotes = notes.filter(note => note.projectId === project.id);
   const ownActivity = activity.filter(item => item.projectId === project.id).slice(0, 8);
+
+  const filteredTasks = useMemo(() => {
+    if (taskFilter === "open") return ownTasks.filter(t => t.status !== "done");
+    if (taskFilter === "done") return ownTasks.filter(t => t.status === "done");
+    return ownTasks;
+  }, [ownTasks, taskFilter]);
+
+  function handleAddInlineTask(e) {
+    e.preventDefault();
+    if (!inlineTaskTitle.trim() || !taskActions.onCreate) return;
+    taskActions.onCreate({
+      title: inlineTaskTitle.trim(),
+      projectId: project.id,
+      status: "todo",
+      priority: "medium"
+    });
+    setInlineTaskTitle("");
+  }
+
   return (
     <>
       <PageIntro eyebrow={project.folder || "Project"} title={project.name} description={project.description || "No description yet."}>
         <button className="button button-secondary" onClick={onBack}>All projects</button>
         <button className="button button-secondary" onClick={() => onEdit(project)}>Edit project</button>
       </PageIntro>
+
+      <form onSubmit={handleAddInlineTask} className="overview-inline-capture card-surface">
+        <span className="capture-icon" aria-hidden="true">＋</span>
+        <input
+          type="text"
+          value={inlineTaskTitle}
+          onChange={e => setInlineTaskTitle(e.target.value)}
+          placeholder={`Quick add a task to ${project.name} (press Enter)…`}
+          aria-label="Quick add task"
+        />
+        <button type="submit" className="button button-primary">Add Task</button>
+      </form>
+
       <section className="section-block">
         <SectionHeading title="Tasks" count={ownTasks.length}>
+          <div className="board-filter-group" role="group" aria-label="Filter project tasks">
+            {[["all", `All (${ownTasks.length})`], ["open", `Open (${ownTasks.filter(t => t.status !== "done").length})`], ["done", `Done (${ownTasks.filter(t => t.status === "done").length})`]].map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                className={`filter-tab ${taskFilter === val ? "active" : ""}`}
+                onClick={() => setTaskFilter(val)}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
           <button className="button button-primary" onClick={() => openCreate("task", project.id)}>Add task</button>
         </SectionHeading>
-        {ownTasks.length === 0
-          ? <div className="card-surface"><Empty title="No tasks in this project" /></div>
-          : <div className="task-list card-surface">{ownTasks.map(task => <TaskRow key={task.id} task={task} projects={[project]} taskActions={taskActions} />)}</div>}
+        {filteredTasks.length === 0
+          ? <div className="card-surface"><Empty title="No tasks match this filter" /></div>
+          : <div className="task-list card-surface">{filteredTasks.map(task => <TaskRow key={task.id} task={task} projects={[project]} taskActions={taskActions} />)}</div>}
       </section>
       <section className="section-block">
         <SectionHeading title="Notes" count={ownNotes.length}>
@@ -1146,17 +1616,87 @@ export function AssistantPage({ messages, aiConfigured, syncMode, onSend, onClea
 
 export function NotesPage({ notes, projects, tasks, openCreate, onDelete, onEdit }) {
   const [query, setQuery] = useState("");
+  const [selectedProject, setSelectedProject] = useState("all");
+  const [pinnedIds, setPinnedIds] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("nexaflow-pinned-notes") || "[]"));
+    } catch {
+      return new Set();
+    }
+  });
+  const [copiedId, setCopiedId] = useState(null);
+
+  function togglePin(id) {
+    setPinnedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      localStorage.setItem("nexaflow-pinned-notes", JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  function handleCopy(note) {
+    const textToCopy = `${note.title}\n\n${note.body || ""}`.trim();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(textToCopy);
+    }
+    setCopiedId(note.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  }
+
   const q = query.trim().toLowerCase();
-  const visible = notes
-    .filter(note => !q || `${note.title} ${note.body || ""}`.toLowerCase().includes(q))
-    .sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  const visible = useMemo(() => {
+    return notes
+      .filter(note => {
+        if (selectedProject !== "all" && note.projectId !== selectedProject) return false;
+        if (q && !`${note.title} ${note.body || ""}`.toLowerCase().includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const aPinned = pinnedIds.has(a.id) ? 1 : 0;
+        const bPinned = pinnedIds.has(b.id) ? 1 : 0;
+        if (bPinned !== aPinned) return bPinned - aPinned;
+        return String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""));
+      });
+  }, [notes, q, selectedProject, pinnedIds]);
+
   return (
     <>
       <PageIntro eyebrow="Notes" title="Notes" description={`${notes.length} ${notes.length === 1 ? "note" : "notes"} saved.`}>
         <button className="button button-primary" onClick={() => openCreate("note")}>New note</button>
       </PageIntro>
       <div className="toolbar card-surface">
-        <label className="search-field"><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search notes…" aria-label="Search notes" /></label>
+        <label className="search-field">
+          <input
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search notes…"
+            aria-label="Search notes"
+          />
+        </label>
+        {projects.length > 0 && (
+          <div className="board-filter-group" role="group" aria-label="Filter notes by project">
+            <button
+              type="button"
+              className={`filter-tab ${selectedProject === "all" ? "active" : ""}`}
+              onClick={() => setSelectedProject("all")}
+            >
+              All projects
+            </button>
+            {projects.map(p => (
+              <button
+                key={p.id}
+                type="button"
+                className={`filter-tab ${selectedProject === p.id ? "active" : ""}`}
+                onClick={() => setSelectedProject(p.id)}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {visible.length === 0
         ? <div className="card-surface"><Empty title={notes.length ? "No notes match your search" : "No notes yet"}>{notes.length ? "" : "Capture a thought and link it to a project or task."}</Empty></div>
@@ -1164,17 +1704,39 @@ export function NotesPage({ notes, projects, tasks, openCreate, onDelete, onEdit
           <div className="note-grid">
             {visible.map(note => {
               const linked = (note.relatedTaskIds || []).map(id => tasks.find(task => task.id === id)).filter(Boolean);
+              const isPinned = pinnedIds.has(note.id);
+              const wordCount = (note.body || "").split(/\s+/).filter(Boolean).length;
               return (
-                <article key={note.id} className="note-card">
-                  <span className="note-symbol" aria-hidden="true">✎</span>
+                <article key={note.id} className={`note-card ${isPinned ? "note-card-pinned" : ""}`}>
+                  <div className="note-card-top-bar">
+                    <span className="note-symbol" aria-hidden="true">✎</span>
+                    <button
+                      type="button"
+                      className={`note-pin-btn ${isPinned ? "pinned" : ""}`}
+                      onClick={() => togglePin(note.id)}
+                      title={isPinned ? "Unpin note" : "Pin note to top"}
+                    >
+                      📌 {isPinned ? "Pinned" : "Pin"}
+                    </button>
+                  </div>
                   <h2>{note.title}</h2>
-                  {projectName(projects, note.projectId) && <small>{projectName(projects, note.projectId)}</small>}
+                  {projectName(projects, note.projectId) && <small className="note-project-chip">{projectName(projects, note.projectId)}</small>}
                   <div className="note-card-markdown">
                     <MarkdownViewer content={(note.body || "").length > 250 ? `${note.body.slice(0, 250)}…` : note.body} />
                   </div>
                   {linked.length > 0 && <div className="task-badges">{linked.map(task => <span className="tag-chip" key={task.id}>{task.title}</span>)}</div>}
-                  <small>Updated {formatDateTime(note.updatedAt || note.createdAt)}</small>
+                  <div className="note-card-footer">
+                    <small>Updated {formatDateTime(note.updatedAt || note.createdAt)} · {wordCount} words</small>
+                  </div>
                   <div className="task-row-actions">
+                    <button
+                      type="button"
+                      className="row-copy-btn"
+                      onClick={() => handleCopy(note)}
+                      title="Copy note text"
+                    >
+                      {copiedId === note.id ? "✓ Copied!" : "📋 Copy"}
+                    </button>
                     <button className="row-edit" onClick={() => onEdit(note)}>Edit</button>
                     <button className="row-delete" onClick={() => onDelete(note.id)}>Delete</button>
                   </div>

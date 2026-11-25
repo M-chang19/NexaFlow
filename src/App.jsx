@@ -738,6 +738,26 @@ export default function App() {
         tasks: current.tasks.map(item => item.id === taskId ? { ...item, subtasks: (item.subtasks || []).map(child => child.id === subtaskId ? { ...child, done: !child.done } : child) } : item)
       };
     }),
+    onAddSubtask: (taskId, title) => update(current => {
+      const task = current.tasks.find(item => item.id === taskId);
+      if (!task || !title.trim()) return current;
+      const newSubtask = { id: makeId(), title: title.trim(), done: false };
+      return {
+        ...current,
+        activity: logActivity(current, `Added subtask "${newSubtask.title}" to ${task.title}`, task.projectId),
+        tasks: current.tasks.map(item => item.id === taskId ? { ...item, subtasks: [...(item.subtasks || []), newSubtask] } : item)
+      };
+    }),
+    onCyclePriority: id => update(current => {
+      const task = current.tasks.find(item => item.id === id);
+      if (!task) return current;
+      const cycle = { low: "medium", medium: "high", high: "low" };
+      const nextPriority = cycle[task.priority] || "medium";
+      return {
+        ...current,
+        tasks: current.tasks.map(item => item.id === id ? { ...item, priority: nextPriority } : item)
+      };
+    }),
     onEdit: task => setCreateItem({ type: "task", record: task }),
     onDuplicate: task => {
       const source = state.tasks.find(item => item.id === task.id);
