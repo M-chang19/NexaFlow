@@ -1346,7 +1346,7 @@ export default function App() {
   }
 
   const page = {
-    overview: <Overview state={state} openCreate={openCreate} navigate={navigate} taskActions={taskActions} preferences={overviewPreferences} />,
+    overview: <Overview state={state} openCreate={openCreate} navigate={navigate} taskActions={taskActions} preferences={overviewPreferences} onOpenProject={id => { setSelectedProjectId(id); navigate("projectDetail"); }} />,
     tasks: <TasksPage tasks={state.tasks} projects={state.projects} notes={state.notes} openCreate={openCreate} taskActions={taskActions} savedViews={savedTaskViews} onSaveView={saveTaskViews} onBulkUpdate={updateSelectedTasks} onBulkDelete={deleteSelectedTasks} />,
     board: <BoardPage tasks={state.tasks} projects={state.projects} taskActions={taskActions} openCreate={openCreate} />,
     calendar: <CalendarPage tasks={state.tasks} projects={state.projects} notes={state.notes} navigate={navigate} onExportCalendar={exportCalendar} openCreate={openCreate} taskActions={taskActions} onQuickCreate={quickCreateTask} />,

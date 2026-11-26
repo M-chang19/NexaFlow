@@ -243,6 +243,20 @@ async function serveBuild(pathname, response) {
     response.end(content);
   } catch (error) {
     if (error.code === "ENOENT" || error.code === "EISDIR") {
+      if (!path.extname(decodedPath)) {
+        try {
+          const indexHtml = await readFile(path.join(buildDirectory, "index.html"));
+          response.writeHead(200, {
+            "Cache-Control": "no-cache",
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Content-Type-Options": "nosniff"
+          });
+          response.end(indexHtml);
+          return;
+        } catch {
+          // fallback to 404 if index.html is missing
+        }
+      }
       sendJson(response, 404, { error: "Not found." });
       return;
     }

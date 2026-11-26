@@ -379,7 +379,7 @@ const FOCUS_TIPS = [
   "Inbox Zero: Your mind is for having ideas, not holding them. Capture everything."
 ];
 
-export function Overview({ state, openCreate, navigate, taskActions, preferences }) {
+export function Overview({ state, openCreate, navigate, taskActions, preferences, onOpenProject }) {
   const [tipIndex, setTipIndex] = useState(0);
   const [quickTitle, setQuickTitle] = useState("");
   const [quickPriority, setQuickPriority] = useState("medium");
@@ -568,7 +568,7 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
               key={p.id}
               type="button"
               className="project-chip-btn"
-              onClick={() => navigate("projects")}
+              onClick={() => onOpenProject ? onOpenProject(p.id) : navigate("projects")}
               title={`View ${p.name}`}
             >
               <i className="chip-dot" />{p.name}
