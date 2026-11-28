@@ -138,6 +138,57 @@ const STARTER_TEMPLATES = [
       "Check unit test coverage and CI results",
       "Leave constructive feedback or approve"
     ]
+  },
+  {
+    id: "tpl-pomodoro-sprint",
+    title: "Pomodoro Deep Work Sprint (25m)",
+    category: "Routines",
+    type: "task",
+    icon: "🍅",
+    priority: "high",
+    estimatedMinutes: 25,
+    tags: ["pomodoro", "sprint"],
+    details: "High-intensity focused sprint: one task, 25 minutes, zero interruptions, quick checkpoint review.",
+    subtasks: [
+      "Select single priority item & close all other tabs",
+      "Set phone on Do Not Disturb",
+      "Run timer with ambient soundscape",
+      "Log completed output & take 5m rest"
+    ]
+  },
+  {
+    id: "tpl-design-system",
+    title: "Design System & UI Component Audit",
+    category: "Development",
+    type: "project",
+    icon: "🎨",
+    folder: "Design",
+    tags: ["ui", "design-system"],
+    details: "Audit components, ensure contrast ratios, test responsiveness, and verify theme consistency.",
+    subtasks: [
+      "Review color palette & contrast ratios (WCAG AAA)",
+      "Audit typography scale & line heights",
+      "Verify light/dark theme CSS variables",
+      "Test component responsiveness across mobile & desktop",
+      "Document component variants in storybook/spec"
+    ]
+  },
+  {
+    id: "tpl-incident-postmortem",
+    title: "Incident Post-Mortem & Retrospective",
+    category: "Operations",
+    type: "project",
+    icon: "🚨",
+    folder: "Operations",
+    tags: ["incident", "postmortem"],
+    details: "Blameless post-mortem framework to uncover root causes and prevent system outages.",
+    subtasks: [
+      "Document incident timeline & severity impact",
+      "Identify 5 Whys root cause analysis",
+      "List immediate remediation actions taken",
+      "Create preventive engineering action items",
+      "Share retro summary with stakeholders"
+    ]
   }
 ];
 
@@ -249,6 +300,94 @@ export function TemplatesPage({ templates, update, notify, logActivity, createIt
     notify("Template deleted.");
   }
 
+  function handleDuplicateTemplate(template) {
+    const duplicated = {
+      id: makeId(),
+      type: template.type,
+      title: `${template.title} (Copy)`,
+      category: "My Custom",
+      details: template.details || "",
+      priority: template.priority || "medium",
+      estimatedMinutes: template.estimatedMinutes || 25,
+      folder: template.folder || "",
+      tags: [...(template.tags || [])],
+      subtasks: [...(template.subtasks || [])]
+    };
+
+    update(current => ({
+      ...current,
+      templates: [...(current.templates || []), duplicated],
+      activity: logActivity(current, `Duplicated template: ${template.title}`)
+    }));
+
+    notify(`Created custom copy of "${template.title}".`);
+    setSelectedCategory("My Custom");
+    triggerConfetti();
+  }
+
+  function handleExportTemplates() {
+    const customList = templates || [];
+    const exportData = {
+      app: "NexaFlow",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      templates: customList.length > 0 ? customList : STARTER_TEMPLATES
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nexaflow-templates-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    notify("Templates exported to JSON file.");
+  }
+
+  function handleImportTemplates(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = event => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        const importedList = Array.isArray(parsed) ? parsed : parsed.templates;
+        if (!Array.isArray(importedList) || importedList.length === 0) {
+          notify("No templates found in uploaded file.");
+          return;
+        }
+
+        const validTemplates = importedList.map(t => ({
+          id: makeId(),
+          type: t.type === "project" ? "project" : "task",
+          title: String(t.title || "Imported Template").slice(0, 120),
+          category: "My Custom",
+          details: String(t.details || ""),
+          priority: t.priority || "medium",
+          estimatedMinutes: Math.max(0, Number(t.estimatedMinutes) || 25),
+          folder: String(t.folder || ""),
+          tags: Array.isArray(t.tags) ? t.tags : [],
+          subtasks: Array.isArray(t.subtasks) ? t.subtasks : []
+        }));
+
+        update(current => ({
+          ...current,
+          templates: [...(current.templates || []), ...validTemplates],
+          activity: logActivity(current, `Imported ${validTemplates.length} custom template(s)`)
+        }));
+
+        notify(`Imported ${validTemplates.length} template(s) successfully!`);
+        setSelectedCategory("My Custom");
+        triggerConfetti();
+      } catch {
+        notify("Failed to parse JSON file.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
   return (
     <section className="view active templates-view">
       <div className="page-intro templates-page-intro">
@@ -257,12 +396,14 @@ export function TemplatesPage({ templates, update, notify, logActivity, createIt
           <h1>Workflow Templates</h1>
           <p>Instantiate battle-tested routines, project scaffolds, and sprint checklists in one click.</p>
         </div>
-        <button
-          className="button button-primary create-template-btn"
-          onClick={() => setShowCreateModal(true)}
-        >
-          ＋ Create Custom Template
-        </button>
+        <div className="templates-intro-actions">
+          <button
+            className="button button-primary create-template-btn"
+            onClick={() => setShowCreateModal(true)}
+          >
+            ＋ Create Custom Template
+          </button>
+        </div>
       </div>
 
       <div className="templates-toolbar card-surface">
@@ -285,6 +426,25 @@ export function TemplatesPage({ templates, update, notify, logActivity, createIt
               {cat}
             </button>
           ))}
+        </div>
+        <div className="templates-import-export-group">
+          <button
+            type="button"
+            className="button button-secondary button-small template-io-btn"
+            onClick={handleExportTemplates}
+            title="Download JSON backup of templates"
+          >
+            ⤓ Export
+          </button>
+          <label className="button button-secondary button-small template-io-btn template-import-label" title="Upload JSON templates file">
+            ⤒ Import
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={handleImportTemplates}
+              style={{ display: "none" }}
+            />
+          </label>
         </div>
       </div>
 
@@ -360,12 +520,22 @@ export function TemplatesPage({ templates, update, notify, logActivity, createIt
                   ))}
                 </div>
 
-                <button
-                  className="button button-primary template-use-btn"
-                  onClick={() => handleUseTemplate(template)}
-                >
-                  Use Template →
-                </button>
+                <div className="template-card-btns">
+                  <button
+                    type="button"
+                    className="button button-secondary button-small template-dup-btn"
+                    onClick={() => handleDuplicateTemplate(template)}
+                    title="Duplicate as custom template"
+                  >
+                    ⎘ Copy
+                  </button>
+                  <button
+                    className="button button-primary template-use-btn"
+                    onClick={() => handleUseTemplate(template)}
+                  >
+                    Use Template →
+                  </button>
+                </div>
               </div>
             </article>
           );

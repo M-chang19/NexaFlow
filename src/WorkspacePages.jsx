@@ -587,10 +587,274 @@ export function Overview({ state, openCreate, navigate, taskActions, preferences
 }
 
 /* ------------------------------------------------------------------ */
+/* Eisenhower Priority Matrix                                          */
+/* ------------------------------------------------------------------ */
+
+function EisenhowerMatrix({ tasks, projects, taskActions, openCreate }) {
+  const today = todayKey();
+  const twoDaysOut = addDays(today, 2);
+  const [quickInputs, setQuickInputs] = useState({});
+  const [dragOverQuad, setDragOverQuad] = useState(null);
+
+  const quadrants = useMemo(() => {
+    const openTasks = tasks.filter(t => t.status !== "done");
+
+    const q1 = [];
+    const q2 = [];
+    const q3 = [];
+    const q4 = [];
+
+    openTasks.forEach(task => {
+      const isUrgent = Boolean(task.dueDate && task.dueDate <= twoDaysOut) || isOverdue(task);
+      const isImportant = task.priority === "high";
+
+      if (isUrgent && isImportant) {
+        q1.push(task);
+      } else if (!isUrgent && isImportant) {
+        q2.push(task);
+      } else if (isUrgent && !isImportant) {
+        q3.push(task);
+      } else {
+        q4.push(task);
+      }
+    });
+
+    return [
+      {
+        id: "q1",
+        num: "Q1",
+        name: "Do First",
+        subtitle: "Urgent & Important",
+        desc: "Critical deadlines, urgent blockers & high impact",
+        badgeClass: "matrix-badge-q1",
+        icon: "🔥",
+        priority: "high",
+        dueDate: today,
+        tasks: q1
+      },
+      {
+        id: "q2",
+        num: "Q2",
+        name: "Schedule",
+        subtitle: "Not Urgent & Important",
+        desc: "Strategic growth, deep work & proactive planning",
+        badgeClass: "matrix-badge-q2",
+        icon: "🎯",
+        priority: "high",
+        dueDate: addDays(today, 5),
+        tasks: q2
+      },
+      {
+        id: "q3",
+        num: "Q3",
+        name: "Delegate / Quick",
+        subtitle: "Urgent & Not Important",
+        desc: "Time-sensitive requests, routine tasks & errands",
+        badgeClass: "matrix-badge-q3",
+        icon: "⚡",
+        priority: "medium",
+        dueDate: today,
+        tasks: q3
+      },
+      {
+        id: "q4",
+        num: "Q4",
+        name: "Don't Do / Backlog",
+        subtitle: "Not Urgent & Not Important",
+        desc: "Low-impact distractions & long-term backlog",
+        badgeClass: "matrix-badge-q4",
+        icon: "📦",
+        priority: "low",
+        dueDate: "",
+        tasks: q4
+      }
+    ];
+  }, [tasks, today, twoDaysOut]);
+
+  function handleQuickAdd(quadrant, e) {
+    e.preventDefault();
+    const title = (quickInputs[quadrant.id] || "").trim();
+    if (!title) return;
+
+    if (taskActions.onCreate) {
+      taskActions.onCreate({
+        title,
+        priority: quadrant.priority,
+        dueDate: quadrant.dueDate,
+        status: "todo"
+      });
+      triggerConfetti();
+    } else if (openCreate) {
+      openCreate("task", "", {
+        title,
+        priority: quadrant.priority,
+        dueDate: quadrant.dueDate
+      });
+    }
+
+    setQuickInputs(prev => ({ ...prev, [quadrant.id]: "" }));
+  }
+
+  function handleMoveToQuadrant(task, targetQuad) {
+    if (!taskActions.onEdit) return;
+    const updates = {
+      ...task,
+      priority: targetQuad.priority,
+      dueDate: targetQuad.dueDate
+    };
+    taskActions.onEdit(updates);
+  }
+
+  function handleDragStart(e, taskId) {
+    e.dataTransfer.setData("text/plain", taskId);
+  }
+
+  function handleDrop(e, targetQuad) {
+    e.preventDefault();
+    setDragOverQuad(null);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      handleMoveToQuadrant(task, targetQuad);
+    }
+  }
+
+  return (
+    <div className="eisenhower-matrix-container">
+      <div className="matrix-explainer card-surface">
+        <div className="explainer-text">
+          <strong>Eisenhower Decision Matrix</strong>
+          <span>Categorize your workflow by urgency and importance to eliminate distraction and prioritize high-value outcomes.</span>
+        </div>
+        <div className="matrix-stats-pills">
+          {quadrants.map(q => (
+            <span key={q.id} className={`matrix-stat-pill ${q.badgeClass}`}>
+              <span className="pill-icon">{q.icon}</span> {q.num}: {q.tasks.length}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="eisenhower-grid">
+        {quadrants.map(q => (
+          <div
+            key={q.id}
+            className={`matrix-quadrant card-surface ${q.id} ${dragOverQuad === q.id ? "drag-over" : ""}`}
+            onDragOver={e => { e.preventDefault(); setDragOverQuad(q.id); }}
+            onDragLeave={() => setDragOverQuad(null)}
+            onDrop={e => handleDrop(e, q)}
+          >
+            <div className="quadrant-header">
+              <div className="quadrant-title-group">
+                <span className="quadrant-icon">{q.icon}</span>
+                <div>
+                  <div className="quadrant-name-row">
+                    <h3>{q.name}</h3>
+                    <span className={`quadrant-badge ${q.badgeClass}`}>{q.num}</span>
+                  </div>
+                  <p className="quadrant-subtitle">{q.subtitle}</p>
+                </div>
+              </div>
+              <span className="quadrant-count">{q.tasks.length}</span>
+            </div>
+            <p className="quadrant-desc">{q.desc}</p>
+
+            <form onSubmit={e => handleQuickAdd(q, e)} className="matrix-inline-add">
+              <input
+                type="text"
+                placeholder={`+ Add task to ${q.name}...`}
+                value={quickInputs[q.id] || ""}
+                onChange={e => setQuickInputs({ ...quickInputs, [q.id]: e.target.value })}
+                className="matrix-add-input"
+              />
+              {Boolean(quickInputs[q.id]?.trim()) && (
+                <button type="submit" className="button button-small button-primary">
+                  Add
+                </button>
+              )}
+            </form>
+
+            <div className="matrix-tasks-list">
+              {q.tasks.length === 0 ? (
+                <div className="matrix-empty-slot">
+                  <span>No tasks in this quadrant</span>
+                </div>
+              ) : (
+                q.tasks.map(task => {
+                  const done = task.status === "done";
+                  return (
+                    <div
+                      key={task.id}
+                      className="matrix-task-card"
+                      draggable
+                      onDragStart={e => handleDragStart(e, task.id)}
+                    >
+                      <div className="matrix-task-main">
+                        <button
+                          type="button"
+                          className={`task-check ${done ? "checked" : ""}`}
+                          onClick={() => {
+                            taskActions.onToggle(task.id);
+                            if (!done) triggerConfetti();
+                          }}
+                          aria-label={`Mark ${task.title} as done`}
+                        >
+                          {done ? "✓" : ""}
+                        </button>
+                        <div className="matrix-task-copy">
+                          <strong className={done ? "task-title-done" : ""}>{task.title}</strong>
+                          <div className="matrix-task-meta">
+                            {task.dueDate && (
+                              <span className={`meta-due ${isOverdue(task) ? "overdue" : ""}`}>
+                                📅 {formatDate(task.dueDate)}
+                              </span>
+                            )}
+                            {task.projectId && (
+                              <span className="meta-project">
+                                ▧ {projectName(projects, task.projectId)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="matrix-task-actions">
+                        <select
+                          className="matrix-move-select"
+                          value=""
+                          onChange={e => {
+                            const target = quadrants.find(item => item.id === e.target.value);
+                            if (target) handleMoveToQuadrant(task, target);
+                          }}
+                          title="Move to another quadrant"
+                        >
+                          <option value="" disabled>Move ▾</option>
+                          {quadrants.filter(item => item.id !== q.id).map(item => (
+                            <option key={item.id} value={item.id}>
+                              {item.num}: {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Tasks                                                               */
 /* ------------------------------------------------------------------ */
 
 export function TasksPage({ tasks, projects, openCreate, taskActions, savedViews, onSaveView, onBulkUpdate, onBulkDelete }) {
+  const [viewMode, setViewMode] = useState("list");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [sort, setSort] = useState("due");
   const [selected, setSelected] = useState(() => new Set());
@@ -631,81 +895,108 @@ export function TasksPage({ tasks, projects, openCreate, taskActions, savedViews
   return (
     <>
       <PageIntro eyebrow="Tasks" title="My tasks" description={`${visible.length} of ${tasks.length} tasks shown.`}>
+        <div className="task-view-switcher">
+          <button
+            type="button"
+            className={`view-toggle-btn ${viewMode === "list" ? "active" : ""}`}
+            onClick={() => setViewMode("list")}
+          >
+            <span aria-hidden="true">▤</span> List
+          </button>
+          <button
+            type="button"
+            className={`view-toggle-btn ${viewMode === "matrix" ? "active" : ""}`}
+            onClick={() => setViewMode("matrix")}
+          >
+            <span aria-hidden="true">▦</span> Eisenhower Matrix
+          </button>
+        </div>
         <button className="button button-primary" onClick={() => openCreate("task")}>New task</button>
       </PageIntro>
 
-      <NaturalLanguageQuickAdd projects={projects} onAddTask={taskActions.onCreate || (taskData => openCreate("task", "", taskData))} />
+      {viewMode === "matrix" ? (
+        <EisenhowerMatrix
+          tasks={visible}
+          projects={projects}
+          taskActions={taskActions}
+          openCreate={openCreate}
+        />
+      ) : (
+        <>
+          <NaturalLanguageQuickAdd projects={projects} onAddTask={taskActions.onCreate || (taskData => openCreate("task", "", taskData))} />
 
-      <div className="toolbar card-surface">
-        <label className="search-field"><input type="search" value={filters.query} onChange={setFilter("query")} placeholder="Filter tasks…" aria-label="Filter tasks" /></label>
-        {[["all", "All"], ["open", "Open"], ...STATUSES].map(([value, label]) => (
-          <button key={value} className={`filter-tab ${filters.status === value ? "active" : ""}`} onClick={() => setFilters(current => ({ ...current, status: value }))}>{label}</button>
-        ))}
-        <label className="sort-field">
-          <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort by">
-            <option value="due">Sort: due date</option>
-            <option value="priority">Sort: priority</option>
-            <option value="created">Sort: newest</option>
-            <option value="title">Sort: title</option>
-          </select>
-        </label>
-      </div>
-      <div className="toolbar-extra">
-        <label className="sort-field">
-          <select value={filters.projectId} onChange={setFilter("projectId")} aria-label="Project">
-            <option value="">All projects</option>
-            <option value="__unassigned__">No project</option>
-            {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
-          </select>
-        </label>
-        <label className="sort-field">
-          <select value={filters.priority} onChange={setFilter("priority")} aria-label="Priority">
-            <option value="">Any priority</option>
-            {PRIORITIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-        {allTags.length > 0 && (
-          <label className="sort-field">
-            <select value={filters.tag} onChange={setFilter("tag")} aria-label="Tag">
-              <option value="">Any tag</option>
-              {allTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
-            </select>
-          </label>
-        )}
-        <button className="link-button" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>
-        <button className="link-button" onClick={saveCurrentView}>Save this view</button>
-        {savedViews.map(view => (
-          <span className="saved-view" key={view.id}>
-            <button className="filter-tab" onClick={() => setFilters({ ...EMPTY_FILTERS, ...view.filters })}>{view.name}</button>
-            <button className="link-button" aria-label={`Delete view ${view.name}`} onClick={() => onSaveView(savedViews.filter(item => item.id !== view.id))}>×</button>
-          </span>
-        ))}
-      </div>
+          <div className="toolbar card-surface">
+            <label className="search-field"><input type="search" value={filters.query} onChange={setFilter("query")} placeholder="Filter tasks…" aria-label="Filter tasks" /></label>
+            {[["all", "All"], ["open", "Open"], ...STATUSES].map(([value, label]) => (
+              <button key={value} className={`filter-tab ${filters.status === value ? "active" : ""}`} onClick={() => setFilters(current => ({ ...current, status: value }))}>{label}</button>
+            ))}
+            <label className="sort-field">
+              <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort by">
+                <option value="due">Sort: due date</option>
+                <option value="priority">Sort: priority</option>
+                <option value="created">Sort: newest</option>
+                <option value="title">Sort: title</option>
+              </select>
+            </label>
+          </div>
+          <div className="toolbar-extra">
+            <label className="sort-field">
+              <select value={filters.projectId} onChange={setFilter("projectId")} aria-label="Project">
+                <option value="">All projects</option>
+                <option value="__unassigned__">No project</option>
+                {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </label>
+            <label className="sort-field">
+              <select value={filters.priority} onChange={setFilter("priority")} aria-label="Priority">
+                <option value="">Any priority</option>
+                {PRIORITIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            {allTags.length > 0 && (
+              <label className="sort-field">
+                <select value={filters.tag} onChange={setFilter("tag")} aria-label="Tag">
+                  <option value="">Any tag</option>
+                  {allTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                </select>
+              </label>
+            )}
+            <button className="link-button" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>
+            <button className="link-button" onClick={saveCurrentView}>Save this view</button>
+            {savedViews.map(view => (
+              <span className="saved-view" key={view.id}>
+                <button className="filter-tab" onClick={() => setFilters({ ...EMPTY_FILTERS, ...view.filters })}>{view.name}</button>
+                <button className="link-button" aria-label={`Delete view ${view.name}`} onClick={() => onSaveView(savedViews.filter(item => item.id !== view.id))}>×</button>
+              </span>
+            ))}
+          </div>
 
-      {selectedIds.length > 0 && (
-        <div className="bulk-toolbar card-surface" role="region" aria-label="Bulk actions">
-          <strong>{selectedIds.length} selected</strong>
-          <select value="" onChange={event => event.target.value && bulk({ status: event.target.value })} aria-label="Set status">
-            <option value="">Set status…</option>
-            {STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <select value="" onChange={event => event.target.value && bulk({ priority: event.target.value })} aria-label="Set priority">
-            <option value="">Set priority…</option>
-            {PRIORITIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <select value="" onChange={event => event.target.value && bulk({ projectId: event.target.value })} aria-label="Move to project">
-            <option value="">Move to project…</option>
-            <option value="__unassigned__">No project</option>
-            {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
-          </select>
-          <button className="button button-secondary" onClick={() => { onBulkDelete(selectedIds); setSelected(new Set()); }}>Delete selected</button>
-          <button className="link-button" onClick={() => setSelected(new Set())}>Clear selection</button>
-        </div>
+          {selectedIds.length > 0 && (
+            <div className="bulk-toolbar card-surface" role="region" aria-label="Bulk actions">
+              <strong>{selectedIds.length} selected</strong>
+              <select value="" onChange={event => event.target.value && bulk({ status: event.target.value })} aria-label="Set status">
+                <option value="">Set status…</option>
+                {STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select value="" onChange={event => event.target.value && bulk({ priority: event.target.value })} aria-label="Set priority">
+                <option value="">Set priority…</option>
+                {PRIORITIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select value="" onChange={event => event.target.value && bulk({ projectId: event.target.value })} aria-label="Move to project">
+                <option value="">Move to project…</option>
+                <option value="__unassigned__">No project</option>
+                {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+              <button className="button button-secondary" onClick={() => { onBulkDelete(selectedIds); setSelected(new Set()); }}>Delete selected</button>
+              <button className="link-button" onClick={() => setSelected(new Set())}>Clear selection</button>
+            </div>
+          )}
+
+          {visible.length === 0
+            ? <div className="card-surface"><Empty title={tasks.length ? "No tasks match these filters" : "No tasks yet"}>{tasks.length ? "Try clearing a filter." : "Create your first task to get started."}</Empty></div>
+            : <div className="task-list card-surface">{visible.map(task => <TaskRow key={task.id} task={task} projects={projects} taskActions={taskActions} selected={selected.has(task.id)} onSelect={toggleSelect} />)}</div>}
+        </>
       )}
-
-      {visible.length === 0
-        ? <div className="card-surface"><Empty title={tasks.length ? "No tasks match these filters" : "No tasks yet"}>{tasks.length ? "Try clearing a filter." : "Create your first task to get started."}</Empty></div>
-        : <div className="task-list card-surface">{visible.map(task => <TaskRow key={task.id} task={task} projects={projects} taskActions={taskActions} selected={selected.has(task.id)} onSelect={toggleSelect} />)}</div>}
     </>
   );
 }
@@ -1248,7 +1539,15 @@ export function FocusPage({ tasks, timer, onStart, onPause, onReset, onTaskChang
             )}
           </div>
           <div className="ambient-buttons">
-            {[["off", "Off"], ["rain", "🌧️ Rain"], ["brown", "☕ Deep Noise"], ["drone", "🧘 Zen Drone"]].map(([type, label]) => (
+            {[
+              ["off", "Off"],
+              ["rain", "🌧️ Rain"],
+              ["brown", "☕ Brown Noise"],
+              ["drone", "🧘 Zen Drone"],
+              ["campfire", "🔥 Campfire"],
+              ["stream", "🌊 Stream"],
+              ["forest", "🌲 Forest Birds"]
+            ].map(([type, label]) => (
               <button
                 key={type}
                 className={`ambient-btn ${ambientSound === type ? "active" : ""}`}

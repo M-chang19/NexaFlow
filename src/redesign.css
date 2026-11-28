@@ -7498,3 +7498,474 @@ select:focus-visible {
   color: #cbd5e1;
 }
 
+/* =================================================================== */
+/* Task View Switcher & Eisenhower Decision Matrix                     */
+/* =================================================================== */
+
+.task-view-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-toggle-btn:hover {
+  color: #0f172a;
+}
+
+.view-toggle-btn.active {
+  background: #ffffff;
+  color: #4f46e5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.eisenhower-matrix-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 14px;
+}
+
+.matrix-explainer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+}
+
+.explainer-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.explainer-text strong {
+  font-size: 15px;
+  color: #1e293b;
+}
+
+.explainer-text span {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.matrix-stats-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.matrix-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.eisenhower-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.matrix-quadrant {
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  padding: 20px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+  min-height: 380px;
+}
+
+.matrix-quadrant.drag-over {
+  border-color: #4f46e5;
+  background: #f5f3ff;
+  transform: translateY(-2px);
+}
+
+.matrix-quadrant.q1 {
+  border-top: 4px solid #ef4444;
+}
+
+.matrix-quadrant.q2 {
+  border-top: 4px solid #3b82f6;
+}
+
+.matrix-quadrant.q3 {
+  border-top: 4px solid #f59e0b;
+}
+
+.matrix-quadrant.q4 {
+  border-top: 4px solid #64748b;
+}
+
+.quadrant-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.quadrant-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.quadrant-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.quadrant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quadrant-name-row h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.quadrant-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.matrix-badge-q1 {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.matrix-badge-q2 {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
+.matrix-badge-q3 {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.matrix-badge-q4 {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.quadrant-subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.quadrant-count {
+  font-size: 13px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.quadrant-desc {
+  font-size: 12.5px;
+  color: #64748b;
+  margin: 0 0 14px 0;
+  line-height: 1.4;
+}
+
+.matrix-inline-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.matrix-add-input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  transition: all 0.15s ease;
+}
+
+.matrix-add-input:focus {
+  outline: none;
+  background: #fff;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.matrix-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 480px;
+}
+
+.matrix-empty-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 90px;
+  border: 1.5px dashed #e2e8f0;
+  border-radius: 10px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.matrix-task-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  cursor: grab;
+  transition: all 0.15s ease;
+}
+
+.matrix-task-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.07);
+}
+
+.matrix-task-card:active {
+  cursor: grabbing;
+}
+
+.matrix-task-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.matrix-task-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.matrix-task-copy strong {
+  font-size: 13.5px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-title-done {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.matrix-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.meta-due.overdue {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.matrix-task-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.matrix-move-select {
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+}
+
+.matrix-move-select:hover {
+  border-color: #94a3b8;
+  background: #ffffff;
+}
+
+/* Templates Import/Export & Duplicate Buttons */
+.templates-import-export-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.template-io-btn {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.template-import-label {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.template-card-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-dup-btn {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+/* Dark Mode Overrides for Eisenhower Matrix & Templates */
+.theme-dark .task-view-switcher {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+.theme-dark .view-toggle-btn {
+  color: #94a3b8;
+}
+
+.theme-dark .view-toggle-btn:hover {
+  color: #f8fafc;
+}
+
+.theme-dark .view-toggle-btn.active {
+  background: #1e293b;
+  color: #818cf8;
+}
+
+.theme-dark .matrix-explainer {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-color: #334155;
+}
+
+.theme-dark .explainer-text strong {
+  color: #f8fafc;
+}
+
+.theme-dark .explainer-text span {
+  color: #94a3b8;
+}
+
+.theme-dark .matrix-quadrant {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.theme-dark .matrix-quadrant.drag-over {
+  background: #27273f;
+  border-color: #6366f1;
+}
+
+.theme-dark .quadrant-name-row h3 {
+  color: #f8fafc;
+}
+
+.theme-dark .quadrant-subtitle,
+.theme-dark .quadrant-desc {
+  color: #94a3b8;
+}
+
+.theme-dark .quadrant-count {
+  background: #0f172a;
+  color: #cbd5e1;
+}
+
+.theme-dark .matrix-add-input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+.theme-dark .matrix-add-input:focus {
+  background: #1e293b;
+  border-color: #6366f1;
+}
+
+.theme-dark .matrix-empty-slot {
+  border-color: #334155;
+  color: #64748b;
+}
+
+.theme-dark .matrix-task-card {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+.theme-dark .matrix-task-card:hover {
+  border-color: #475569;
+}
+
+.theme-dark .matrix-task-copy strong {
+  color: #f8fafc;
+}
+
+.theme-dark .matrix-move-select {
+  background: #1e293b;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+
+

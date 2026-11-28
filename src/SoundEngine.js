@@ -111,6 +111,171 @@ class AmbientSoundEngine {
       return;
     }
 
+    if (type === "campfire") {
+      // Warm brown noise base + crackle bursts
+      const brownBuf = this.createNoiseBuffer("brown");
+      if (!brownBuf) return;
+      const noise = ctx.createBufferSource();
+      noise.buffer = brownBuf;
+      noise.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(380, ctx.currentTime);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.masterGain);
+      noise.start();
+
+      let crackleTimer = null;
+      const playCrackle = () => {
+        if (!this.currentSource || this.currentType !== "campfire") return;
+        try {
+          const osc = ctx.createOscillator();
+          const popGain = ctx.createGain();
+          const popFilter = ctx.createBiquadFilter();
+
+          osc.type = Math.random() > 0.5 ? "triangle" : "sawtooth";
+          osc.frequency.setValueAtTime(600 + Math.random() * 1400, ctx.currentTime);
+
+          popFilter.type = "highpass";
+          popFilter.frequency.setValueAtTime(800, ctx.currentTime);
+
+          popGain.gain.setValueAtTime(0.06 + Math.random() * 0.08, ctx.currentTime);
+          popGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.04 + Math.random() * 0.06);
+
+          osc.connect(popFilter);
+          popFilter.connect(popGain);
+          popGain.connect(this.masterGain);
+
+          osc.start();
+          osc.stop(ctx.currentTime + 0.12);
+        } catch {}
+
+        const nextDelay = 120 + Math.random() * 450;
+        crackleTimer = setTimeout(playCrackle, nextDelay);
+      };
+      playCrackle();
+
+      this.currentSource = {
+        stop: () => {
+          if (crackleTimer) clearTimeout(crackleTimer);
+          try {
+            noise.stop();
+            noise.disconnect();
+          } catch {}
+        }
+      };
+      return;
+    }
+
+    if (type === "stream") {
+      // Gentle bubbling water stream: pink noise with resonant bandpass + undulating LFO
+      const pinkBuf = this.createNoiseBuffer("pink");
+      if (!pinkBuf) return;
+      const noise = ctx.createBufferSource();
+      noise.buffer = pinkBuf;
+      noise.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(550, ctx.currentTime);
+      filter.Q.setValueAtTime(2.2, ctx.currentTime);
+
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.setValueAtTime(0.35, ctx.currentTime);
+      lfoGain.gain.setValueAtTime(140, ctx.currentTime);
+      lfo.connect(filter.frequency);
+      lfo.start();
+
+      const streamGain = ctx.createGain();
+      streamGain.gain.setValueAtTime(0.38, ctx.currentTime);
+
+      noise.connect(filter);
+      filter.connect(streamGain);
+      streamGain.connect(this.masterGain);
+      noise.start();
+
+      this.currentSource = {
+        stop: () => {
+          try {
+            lfo.stop();
+            lfo.disconnect();
+            noise.stop();
+            noise.disconnect();
+          } catch {}
+        }
+      };
+      return;
+    }
+
+    if (type === "forest") {
+      // Airy forest wind + soft procedural chirps
+      const pinkBuf = this.createNoiseBuffer("pink");
+      if (!pinkBuf) return;
+      const noise = ctx.createBufferSource();
+      noise.buffer = pinkBuf;
+      noise.loop = true;
+
+      const windFilter = ctx.createBiquadFilter();
+      windFilter.type = "lowpass";
+      windFilter.frequency.setValueAtTime(650, ctx.currentTime);
+
+      const windGain = ctx.createGain();
+      windGain.gain.setValueAtTime(0.18, ctx.currentTime);
+
+      noise.connect(windFilter);
+      windFilter.connect(windGain);
+      windGain.connect(this.masterGain);
+      noise.start();
+
+      let chirpTimer = null;
+      const playChirp = () => {
+        if (!this.currentSource || this.currentType !== "forest") return;
+        try {
+          const chirpOsc = ctx.createOscillator();
+          const chirpGain = ctx.createGain();
+          const t = ctx.currentTime;
+          const baseFreq = 2400 + Math.random() * 800;
+
+          chirpOsc.type = "sine";
+          chirpOsc.frequency.setValueAtTime(baseFreq, t);
+          chirpOsc.frequency.exponentialRampToValueAtTime(baseFreq + 1200, t + 0.08);
+          chirpOsc.frequency.exponentialRampToValueAtTime(baseFreq + 400, t + 0.18);
+
+          chirpGain.gain.setValueAtTime(0.001, t);
+          chirpGain.gain.linearRampToValueAtTime(0.04, t + 0.04);
+          chirpGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+
+          chirpOsc.connect(chirpGain);
+          chirpGain.connect(this.masterGain);
+
+          chirpOsc.start(t);
+          chirpOsc.stop(t + 0.24);
+        } catch {}
+
+        const nextChirp = 3200 + Math.random() * 4500;
+        chirpTimer = setTimeout(playChirp, nextChirp);
+      };
+      chirpTimer = setTimeout(playChirp, 1800);
+
+      this.currentSource = {
+        stop: () => {
+          if (chirpTimer) clearTimeout(chirpTimer);
+          try {
+            noise.stop();
+            noise.disconnect();
+          } catch {}
+        }
+      };
+      return;
+    }
+
     // Rain or Brown noise
     const buffer = this.createNoiseBuffer(type === "rain" ? "rain" : "brown");
     if (!buffer) return;
